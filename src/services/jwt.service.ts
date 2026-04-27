@@ -1,15 +1,15 @@
 import jwt from "jsonwebtoken";
 import { env } from "../config/env";
 
-type AppUser = {
+export type AppJwtPayload = {
   id: string;
   nombre: string;
   email: string;
   rol: string;
 };
 
-export function signAppToken(user: AppUser): string {
-  return jwt.sign(user, env.jwtSecret, {
-    expiresIn: env.jwtExpiresIn as any,
+export function signAppToken(payload: AppJwtPayload) {
+  return jwt.sign(payload, env.jwtSecret, {
+    expiresIn: env.jwtExpiresIn || "8h",
   });
 }
