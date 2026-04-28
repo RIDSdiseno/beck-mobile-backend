@@ -1,4 +1,4 @@
-import jwt from "jsonwebtoken";
+import jwt, { Secret, SignOptions } from "jsonwebtoken";
 import { env } from "../config/env";
 
 export type AppJwtPayload = {
@@ -9,7 +9,7 @@ export type AppJwtPayload = {
 };
 
 export function signAppToken(payload: AppJwtPayload) {
-  return jwt.sign(payload, env.jwtSecret, {
-    expiresIn: env.jwtExpiresIn || "8h",
+  return jwt.sign(payload, env.jwtSecret as Secret, {
+    expiresIn: (env.jwtExpiresIn || "8h") as SignOptions["expiresIn"],
   });
 }

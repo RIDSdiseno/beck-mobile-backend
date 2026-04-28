@@ -34,5 +34,5 @@ export async function getMisObrasByUser(userId: string, rol: string) {
     },
   });
 
-  return asignaciones.map((item) => item.obras);
+  return asignaciones.map((item: any) => item.obras);
 }
