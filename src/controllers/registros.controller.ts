@@ -25,6 +25,10 @@ function buildCloudinaryFolder(codigoObra: string, fecha: Date) {
   return `beck/${year}/${codigoObra}/${yyyy}-${mm}-${dd}/registros`;
 }
 
+function getParamValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
 export async function createRegistro(req: Request, res: Response) {
   try {
     const userId = req.user?.id;
@@ -130,7 +134,7 @@ export async function createRegistro(req: Request, res: Response) {
 
 export async function updateRegistroObservaciones(req: Request, res: Response) {
   try {
-    const registroId = req.params.id;
+    const registroId = getParamValue(req.params.id);
     const { observaciones } = req.body ?? {};
 
     if (!registroId) {
@@ -165,7 +169,7 @@ export async function updateRegistroObservaciones(req: Request, res: Response) {
 
 export async function uploadRegistroFotos(req: Request, res: Response) {
   try {
-    const registroId = req.params.id;
+    const registroId = getParamValue(req.params.id);
     const userId = req.user?.id;
     const files = req.files as Express.Multer.File[] | undefined;
 
@@ -185,9 +189,6 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
 
     const registro = await prisma.registros_terreno.findUnique({
       where: { id: registroId },
-      include: {
-        obras: true,
-      },
     });
 
     if (!registro) {
@@ -197,8 +198,20 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
       });
     }
 
+    const obra = await prisma.obras.findUnique({
+      where: { id: registro.obra_id },
+      select: { codigo: true },
+    });
+
+    if (!obra) {
+      return res.status(404).json({
+        success: false,
+        error: "Obra del registro no encontrada",
+      });
+    }
+
     const folder = buildCloudinaryFolder(
-      registro.obras.codigo,
+      obra.codigo,
       new Date(registro.fecha)
     );
 
