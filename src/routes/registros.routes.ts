@@ -3,12 +3,14 @@ import { verifyAppToken } from "../middlewares/auth.middleware";
 import { upload } from "../middlewares/upload.middleware";
 import {
   createRegistro,
+  getMisRegistros,
   updateRegistroObservaciones,
   uploadRegistroFotos,
 } from "../controllers/registros.controller";
 
 const router = Router();
 
+router.get("/mis-registros", verifyAppToken, getMisRegistros);
 router.post("/", verifyAppToken, createRegistro);
 router.put("/:id/observaciones", verifyAppToken, updateRegistroObservaciones);
 router.post(

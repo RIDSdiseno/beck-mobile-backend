@@ -132,6 +132,61 @@ export async function createRegistro(req: Request, res: Response) {
   }
 }
 
+export async function getMisRegistros(req: Request, res: Response) {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: "Usuario no autenticado",
+      });
+    }
+
+    const registros = await prisma.registros_terreno.findMany({
+      where: {
+        usuario_id: userId,
+      },
+      orderBy: {
+        created_at: "desc",
+      },
+      include: {
+        obras: {
+          select: {
+            id: true,
+            nombre: true,
+            codigo: true,
+            cliente: true,
+            direccion: true,
+          },
+        },
+        fotos: {
+          select: {
+            id: true,
+            url: true,
+            created_at: true,
+          },
+          orderBy: {
+            created_at: "desc",
+          },
+        },
+      },
+    });
+
+    return res.json({
+      success: true,
+      data: registros,
+    });
+  } catch (error) {
+    console.error("GET MIS REGISTROS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No se pudieron obtener los registros",
+    });
+  }
+}
+
 export async function updateRegistroObservaciones(req: Request, res: Response) {
   try {
     const registroId = getParamValue(req.params.id);
