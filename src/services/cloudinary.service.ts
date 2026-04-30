@@ -1,4 +1,4 @@
-import { v2 as cloudinary } from "cloudinary";
+import { UploadApiResponse, v2 as cloudinary } from "cloudinary";
 import streamifier from "streamifier";
 
 cloudinary.config({
@@ -13,7 +13,7 @@ export function uploadBufferToCloudinary(
     folder?: string;
     publicId?: string;
   }
-): Promise<any> {
+): Promise<UploadApiResponse> {
   return new Promise((resolve, reject) => {
     const uploadStream = cloudinary.uploader.upload_stream(
       {
@@ -23,6 +23,7 @@ export function uploadBufferToCloudinary(
       },
       (error, result) => {
         if (error) return reject(error);
+        if (!result) return reject(new Error("Cloudinary no devolvió resultado"));
         resolve(result);
       }
     );

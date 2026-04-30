@@ -1,4 +1,3 @@
-import { createRemoteJWKSet, jwtVerify } from "jose";
 import { env } from "../config/env";
 
 export type MicrosoftUserClaims = {
@@ -8,11 +7,19 @@ export type MicrosoftUserClaims = {
 };
 
 const issuer = `https://login.microsoftonline.com/${env.azureTenantId}/v2.0`;
-const jwks = createRemoteJWKSet(
-  new URL(
-    `https://login.microsoftonline.com/${env.azureTenantId}/discovery/v2.0/keys`
-  )
-);
+let jwks: any;
+
+async function getMicrosoftJwtVerifier() {
+  const { createRemoteJWKSet, jwtVerify } = await import("jose");
+
+  jwks ??= createRemoteJWKSet(
+    new URL(
+      `https://login.microsoftonline.com/${env.azureTenantId}/discovery/v2.0/keys`
+    )
+  );
+
+  return { jwtVerify, jwks };
+}
 
 function decodeName(payload: any): string {
   return (
@@ -34,6 +41,8 @@ function decodeEmail(payload: any): string {
 export async function verifyMicrosoftIdToken(
   idToken: string
 ): Promise<MicrosoftUserClaims> {
+  const { jwtVerify, jwks } = await getMicrosoftJwtVerifier();
+
   const verified = await jwtVerify(idToken, jwks, {
     issuer,
     audience: env.azureClientId,
