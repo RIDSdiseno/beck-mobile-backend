@@ -178,6 +178,8 @@ model obras {
   creado_por_id     String              @db.Uuid
   created_at        DateTime            @default(now()) @db.Timestamp(6)
   updated_at        DateTime            @default(now()) @db.Timestamp(6)
+  cliente           String?             @db.VarChar(255)
+  direccion         String?
   cotizaciones      cotizaciones[]
   usuarios          usuarios            @relation(fields: [creado_por_id], references: [id])
   registros_terreno registros_terreno[]
@@ -329,6 +331,7 @@ enum EstadoObra {
   activa
   pausada
   finalizada
+  inactiva
 }
 
 enum EstadoRegistroTerreno {
