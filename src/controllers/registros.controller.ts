@@ -266,7 +266,7 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
     }
 
     const folder = buildCloudinaryFolder(
-      obra.codigo,
+      obra.codigo || registro.obra_id,
       new Date(registro.fecha)
     );
 
