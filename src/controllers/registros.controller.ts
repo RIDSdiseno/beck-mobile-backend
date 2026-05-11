@@ -16,13 +16,30 @@ function getDiaSemana(fecha: Date) {
   return dias[fecha.getDay()];
 }
 
-function buildCloudinaryFolder(codigoObra: string, fecha: Date) {
+function sanitizeCloudinaryFolderSegment(value: string | null | undefined) {
+  const sanitized = String(value || "")
+    .trim()
+    .replace(/[\/\\]+/g, "-")
+    .replace(/\s+/g, " ");
+
+  return sanitized || "sin-nombre";
+}
+
+function buildCloudinaryFolder(
+  codigoObra: string,
+  fecha: Date,
+  piso: string | null | undefined,
+  nombreSellador: string | null | undefined
+) {
   const year = String(fecha.getFullYear());
   const yyyy = fecha.getFullYear();
   const mm = String(fecha.getMonth() + 1).padStart(2, "0");
   const dd = String(fecha.getDate()).padStart(2, "0");
+  const obraSegment = sanitizeCloudinaryFolderSegment(codigoObra);
+  const pisoSegment = sanitizeCloudinaryFolderSegment(`Piso ${piso || "sin-piso"}`);
+  const selladorSegment = sanitizeCloudinaryFolderSegment(nombreSellador);
 
-  return `beck/${year}/${codigoObra}/${yyyy}-${mm}-${dd}/registros`;
+  return `BeckSoluciones/${year}/${obraSegment}/${pisoSegment}/${yyyy}-${mm}-${dd}/${selladorSegment}/registros`;
 }
 
 function getParamValue(value: string | string[] | undefined) {
@@ -267,7 +284,9 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
 
     const folder = buildCloudinaryFolder(
       obra.codigo || registro.obra_id,
-      new Date(registro.fecha)
+      new Date(registro.fecha),
+      registro.piso,
+      req.user?.nombre
     );
 
     const uploadedFotos = [];
