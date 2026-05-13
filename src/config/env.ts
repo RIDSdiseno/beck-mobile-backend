@@ -12,6 +12,7 @@ function required(name: string): string {
 
 export const env = {
   port: Number(process.env.PORT || 3001),
+  corsOrigin: process.env.CORS_ORIGIN || "none",
   azureClientId: required("AZURE_AD_CLIENT_ID"),
   azureTenantId: required("AZURE_AD_TENANT_ID"),
   jwtSecret: required("JWT_SECRET"),

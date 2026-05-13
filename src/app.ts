@@ -1,5 +1,6 @@
 import cors from "cors";
 import express from "express";
+import { env } from "./config/env";
 import authRoutes from "./routes/auth.routes";
 import obrasRoutes from "./routes/obras.routes";
 import registrosRoutes from "./routes/registros.routes";
@@ -7,7 +8,16 @@ import registrosRoutes from "./routes/registros.routes";
 
 const app = express();
 
-app.use(cors());
+if (env.corsOrigin !== "none") {
+  app.use(
+    cors({
+      origin:
+        env.corsOrigin === "*"
+          ? true
+          : env.corsOrigin.split(",").map((origin) => origin.trim()),
+    })
+  );
+}
 app.use(express.json());
 
 app.get("/", (_req, res) => {

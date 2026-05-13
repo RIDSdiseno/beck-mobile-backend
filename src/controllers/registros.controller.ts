@@ -46,9 +46,84 @@ function getParamValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function normalizeText(value: unknown) {
+  return String(value || "").trim();
+}
+
+function parsePositiveInteger(value: unknown, fieldName: string) {
+  const parsed = Number(value);
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return {
+      value: null,
+      error: `${fieldName} debe ser un número entero mayor a 0`,
+    };
+  }
+
+  return { value: parsed, error: null };
+}
+
+function parseNonNegativeNumber(value: unknown, fieldName: string) {
+  const parsed = Number(String(value).replace(",", "."));
+
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return {
+      value: null,
+      error: `${fieldName} debe ser un número mayor o igual a 0`,
+    };
+  }
+
+  return { value: parsed, error: null };
+}
+
+function parsePositiveNumber(value: unknown, fieldName: string) {
+  const parsed = Number(String(value).replace(",", "."));
+
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return {
+      value: null,
+      error: `${fieldName} debe ser un número mayor a 0`,
+    };
+  }
+
+  return { value: parsed, error: null };
+}
+
+function isAdmin(role: string | undefined) {
+  return role === "administrador";
+}
+
+async function canAccessObra(userId: string, role: string | undefined, obraId: string) {
+  if (isAdmin(role)) return true;
+
+  const asignacion = await prisma.usuarios_obras.findUnique({
+    where: {
+      usuario_id_obra_id: {
+        usuario_id: userId,
+        obra_id: obraId,
+      },
+    },
+  });
+
+  return Boolean(asignacion);
+}
+
+async function canModifyRegistro(
+  userId: string,
+  role: string | undefined,
+  registro: { usuario_id: string; obra_id: string }
+) {
+  if (isAdmin(role)) return true;
+  if (registro.usuario_id === userId) return true;
+  if (role !== "jefeobra") return false;
+
+  return canAccessObra(userId, role, registro.obra_id);
+}
+
 export async function createRegistro(req: Request, res: Response) {
   try {
     const userId = req.user?.id;
+    const userRole = req.user?.rol;
 
     if (!userId) {
       return res.status(401).json({
@@ -71,21 +146,37 @@ export async function createRegistro(req: Request, res: Response) {
       holgura,
       accesibilidad,
       observaciones,
+      itemizadoSacyr,
+      tipoRegistro,
+      metrosLineales,
     } = req.body ?? {};
+    const normalizedTipoRegistro = normalizeText(tipoRegistro) || "sello_cortafuego";
+    const isJuntaLineal = normalizedTipoRegistro === "junta_lineal_espuma";
+
+    if (!["sello_cortafuego", "junta_lineal_espuma"].includes(normalizedTipoRegistro)) {
+      return res.status(400).json({
+        success: false,
+        error: "tipoRegistro no válido",
+      });
+    }
 
     const requiredFields = {
       obraId,
       fecha,
-      descripcionMaterial,
       modulo,
       piso,
       ejeNumerico,
       ejeAlfabetico,
-      numeroSello,
-      cantidadSellos,
       nombreSellador,
-      holgura,
-      accesibilidad,
+      ...(isJuntaLineal
+        ? { metrosLineales }
+        : {
+            descripcionMaterial,
+            numeroSello,
+            cantidadSellos,
+            holgura,
+            accesibilidad,
+          }),
     };
 
     const missingFields = Object.entries(requiredFields)
@@ -112,25 +203,77 @@ export async function createRegistro(req: Request, res: Response) {
       });
     }
 
+    const cantidadSellosParsed = isJuntaLineal
+      ? { value: 1, error: null }
+      : parsePositiveInteger(cantidadSellos, "cantidadSellos");
+    const holguraParsed = isJuntaLineal
+      ? { value: 0, error: null }
+      : parseNonNegativeNumber(holgura, "holgura");
+    const accesibilidadParsed = isJuntaLineal
+      ? { value: 1, error: null }
+      : parsePositiveInteger(accesibilidad, "accesibilidad");
+    const metrosLinealesParsed = isJuntaLineal
+      ? parsePositiveNumber(metrosLineales, "longitud")
+      : { value: null, error: null };
+    const numericErrors = [
+      cantidadSellosParsed.error,
+      holguraParsed.error,
+      accesibilidadParsed.error,
+      metrosLinealesParsed.error,
+    ].filter(Boolean);
+
+    if (numericErrors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: numericErrors.join(". "),
+      });
+    }
+
+    const obra = await prisma.obras.findUnique({
+      where: { id: String(obraId) },
+      select: { id: true },
+    });
+
+    if (!obra) {
+      return res.status(404).json({
+        success: false,
+        error: "Obra no encontrada",
+      });
+    }
+
+    const hasObraAccess = await canAccessObra(userId, userRole, obra.id);
+
+    if (!hasObraAccess) {
+      return res.status(403).json({
+        success: false,
+        error: "No tienes permisos para registrar información en esta obra",
+      });
+    }
+
     const registro = await prisma.registros_terreno.create({
       data: {
-        obra_id: obraId,
+        obra_id: obra.id,
         usuario_id: userId,
         fecha: fechaDate,
         dia_semana: getDiaSemana(fechaDate),
-        descripcion_material: descripcionMaterial,
-        modulo: String(modulo),
-        piso: String(piso),
-        eje_numerico: Number(ejeNumerico),
-        eje_alfabetico: String(ejeAlfabetico),
-        numero_sello: String(numeroSello),
-        cantidad_sellos: Number(cantidadSellos),
-        nombre_sellador: String(nombreSellador),
-        holgura: Number(holgura),
-        accesibilidad: Number(accesibilidad),
-        observaciones: observaciones || null,
+        descripcion_material: isJuntaLineal
+          ? "Junta Lineal Espuma"
+          : normalizeText(descripcionMaterial),
+        modulo: normalizeText(modulo),
+        piso: normalizeText(piso),
+        eje_numerico: normalizeText(ejeNumerico),
+        eje_alfabetico: normalizeText(ejeAlfabetico),
+        numero_sello: isJuntaLineal ? "N/A" : normalizeText(numeroSello),
+        cantidad_sellos: cantidadSellosParsed.value!,
+        nombre_sellador: normalizeText(nombreSellador),
+        holgura: holguraParsed.value!,
+        accesibilidad: accesibilidadParsed.value!,
+        observaciones: normalizeText(observaciones) || null,
         fotos_urls: [],
         estado: "pendiente",
+        itemizado_sacyr: isJuntaLineal ? null : normalizeText(itemizadoSacyr) || null,
+        metros_lineales: isJuntaLineal ? metrosLinealesParsed.value! : null,
+        tipo_registro: normalizedTipoRegistro,
       },
     });
 
@@ -207,7 +350,16 @@ export async function getMisRegistros(req: Request, res: Response) {
 export async function updateRegistroObservaciones(req: Request, res: Response) {
   try {
     const registroId = getParamValue(req.params.id);
+    const userId = req.user?.id;
+    const userRole = req.user?.rol;
     const { observaciones } = req.body ?? {};
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: "Usuario no autenticado",
+      });
+    }
 
     if (!registroId) {
       return res.status(400).json({
@@ -216,10 +368,35 @@ export async function updateRegistroObservaciones(req: Request, res: Response) {
       });
     }
 
+    const currentRegistro = await prisma.registros_terreno.findUnique({
+      where: { id: registroId },
+      select: {
+        id: true,
+        usuario_id: true,
+        obra_id: true,
+      },
+    });
+
+    if (!currentRegistro) {
+      return res.status(404).json({
+        success: false,
+        error: "Registro no encontrado",
+      });
+    }
+
+    const hasAccess = await canModifyRegistro(userId, userRole, currentRegistro);
+
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        error: "No tienes permisos para modificar este registro",
+      });
+    }
+
     const registro = await prisma.registros_terreno.update({
       where: { id: registroId },
       data: {
-        observaciones: observaciones || null,
+        observaciones: normalizeText(observaciones) || null,
         updated_at: new Date(),
       },
     });
@@ -243,7 +420,15 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
   try {
     const registroId = getParamValue(req.params.id);
     const userId = req.user?.id;
+    const userRole = req.user?.rol;
     const files = req.files as Express.Multer.File[] | undefined;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: "Usuario no autenticado",
+      });
+    }
 
     if (!registroId) {
       return res.status(400).json({
@@ -267,6 +452,15 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
       return res.status(404).json({
         success: false,
         error: "Registro no encontrado",
+      });
+    }
+
+    const hasAccess = await canModifyRegistro(userId, userRole, registro);
+
+    if (!hasAccess) {
+      return res.status(403).json({
+        success: false,
+        error: "No tienes permisos para subir fotos a este registro",
       });
     }
 

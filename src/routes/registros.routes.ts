@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { verifyAppToken } from "../middlewares/auth.middleware";
-import { upload } from "../middlewares/upload.middleware";
+import { uploadRegistroFotosFiles } from "../middlewares/upload.middleware";
 import {
   createRegistro,
   getMisRegistros,
@@ -16,7 +16,7 @@ router.put("/:id/observaciones", verifyAppToken, updateRegistroObservaciones);
 router.post(
   "/:id/fotos",
   verifyAppToken,
-  upload.array("fotos", 10),
+  uploadRegistroFotosFiles,
   uploadRegistroFotos
 );
 

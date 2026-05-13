@@ -66,6 +66,29 @@ model funnel_beck {
   dolar_valor           Decimal?            @db.Decimal(12, 4)
   fecha_tipo_cambio     DateTime?           @db.Timestamp(6)
   uf_valor              Decimal?            @db.Decimal(12, 4)
+  ajustes_solicitados   String?
+  cargo_contacto        String?             @db.VarChar(120)
+  contrapropuestas      String?
+  correo_contacto       String?             @db.VarChar(255)
+  documento_respaldo    String?
+  etapa_perdida         String?             @db.VarChar(100)
+  fecha_primer_contacto DateTime?           @db.Date
+  fecha_proxima_accion  DateTime?           @db.Date
+  fecha_reactivacion    DateTime?           @db.Date
+  flujo_posterior       String?
+  motivo_postergacion   String?
+  necesidad_detectada   String?
+  nivel_interes         String?             @db.VarChar(50)
+  nombre_contacto       String?             @db.VarChar(255)
+  objeciones            String?
+  probabilidad_cierre   Int?
+  proxima_accion        String?
+  rut_empresa           String?             @db.VarChar(20)
+  telefono_contacto     String?             @db.VarChar(50)
+  timing_estimado       String?             @db.VarChar(100)
+  tipo_cliente          String?             @db.VarChar(100)
+  tipo_contacto         String?             @db.VarChar(100)
+  tipo_oportunidad      String?             @db.VarChar(100)
   cotizaciones          cotizaciones[]
 
   @@index([comuna])
@@ -195,12 +218,12 @@ model procesamiento_ingenieria {
   id                     String            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   registro_terreno_id    String            @unique @db.Uuid
   usuario_id             String            @db.Uuid
-  codigo                 String            @db.VarChar(100)
-  itemizado_id           String            @db.Uuid
-  total_sellos_calculado Decimal           @db.Decimal(12, 2)
+  codigo                 String?           @db.VarChar(100)
+  itemizado_id           String?           @db.Uuid
+  total_sellos_calculado Decimal?          @db.Decimal(12, 2)
   notas                  String?
   procesado_at           DateTime          @default(now()) @db.Timestamp(6)
-  itemizados             itemizados        @relation(fields: [itemizado_id], references: [id])
+  itemizados             itemizados?       @relation(fields: [itemizado_id], references: [id])
   registros_terreno      registros_terreno @relation(fields: [registro_terreno_id], references: [id], onDelete: Cascade)
   usuarios               usuarios          @relation(fields: [usuario_id], references: [id])
 
@@ -218,7 +241,7 @@ model registros_terreno {
   descripcion_material     String                    @db.VarChar(500)
   modulo                   String                    @db.VarChar(100)
   piso                     String                    @db.VarChar(50)
-  eje_numerico             Int
+  eje_numerico             String                    @db.VarChar(50)
   eje_alfabetico           String                    @db.VarChar(10)
   numero_sello             String                    @db.VarChar(100)
   cantidad_sellos          Int
@@ -230,6 +253,9 @@ model registros_terreno {
   created_at               DateTime                  @default(now()) @db.Timestamp(6)
   updated_at               DateTime                  @default(now()) @db.Timestamp(6)
   estado                   EstadoRegistroTerreno     @default(pendiente)
+  metros_lineales          Float?
+  tipo_registro            String                    @default("sello_cortafuego") @db.VarChar(50)
+  itemizado_sacyr          String?                   @db.VarChar(255)
   fotos                    fotos_registro[]
   procesamiento_ingenieria procesamiento_ingenieria?
   obras                    obras                     @relation(fields: [obra_id], references: [id], onDelete: Cascade)
@@ -239,6 +265,7 @@ model registros_terreno {
   @@index([fecha(sort: Desc)])
   @@index([obra_id])
   @@index([usuario_id])
+  @@index([tipo_registro])
 }
 
 model fotos_registro {
@@ -318,6 +345,7 @@ model movimientos_crm {
 enum EstadoCierreFunnel {
   ganada
   perdida
+  postergada
 }
 
 enum EstadoCotizacion {
