@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { EstadoObra } from "@prisma/client";
 import { prisma } from "../config/prisma";
 import { uploadBufferToCloudinary } from "../services/cloudinary.service";
 
@@ -93,8 +94,25 @@ function isAdmin(role: string | undefined) {
   return role === "administrador";
 }
 
+function canUseAvailableObras(role: string | undefined) {
+  return role === "terreno" || role === "jefeobra";
+}
+
+function isObraOperable(estado: EstadoObra) {
+  return estado === EstadoObra.activa || estado === EstadoObra.pausada;
+}
+
 async function canAccessObra(userId: string, role: string | undefined, obraId: string) {
   if (isAdmin(role)) return true;
+
+  if (canUseAvailableObras(role)) {
+    const obra = await prisma.obras.findUnique({
+      where: { id: obraId },
+      select: { estado: true },
+    });
+
+    return Boolean(obra && isObraOperable(obra.estado));
+  }
 
   const asignacion = await prisma.usuarios_obras.findUnique({
     where: {
@@ -231,7 +249,7 @@ export async function createRegistro(req: Request, res: Response) {
 
     const obra = await prisma.obras.findUnique({
       where: { id: String(obraId) },
-      select: { id: true },
+      select: { id: true, estado: true },
     });
 
     if (!obra) {
@@ -246,7 +264,10 @@ export async function createRegistro(req: Request, res: Response) {
     if (!hasObraAccess) {
       return res.status(403).json({
         success: false,
-        error: "No tienes permisos para registrar información en esta obra",
+        error:
+          obra.estado === EstadoObra.inactiva || obra.estado === EstadoObra.finalizada
+            ? "Esta obra no permite registros mientras este inactiva o finalizada"
+            : "No tienes permisos para registrar información en esta obra",
       });
     }
 

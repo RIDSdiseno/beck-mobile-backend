@@ -24,7 +24,7 @@ export async function getMisObras(req: Request, res: Response) {
 
     return res.status(500).json({
       success: false,
-      error: "No se pudieron obtener las obras asignadas",
+      error: "No se pudieron obtener las obras disponibles",
     });
   }
 }
