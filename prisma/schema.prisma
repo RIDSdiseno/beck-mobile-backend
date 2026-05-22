@@ -265,6 +265,7 @@ model registros_terreno {
   created_at               DateTime                  @default(now()) @db.Timestamp(6)
   updated_at               DateTime                  @default(now()) @db.Timestamp(6)
   estado                   EstadoRegistroTerreno     @default(pendiente)
+  devuelto_a_tecnico       Boolean                   @default(false)
   metros_lineales          Float?
   tipo_registro            String                    @default("sello_cortafuego") @db.VarChar(50)
   itemizado_sacyr          String?                   @db.VarChar(255)
@@ -274,6 +275,7 @@ model registros_terreno {
   usuarios                 usuarios                  @relation(fields: [usuario_id], references: [id])
 
   @@index([estado])
+  @@index([devuelto_a_tecnico])
   @@index([fecha(sort: Desc)])
   @@index([obra_id])
   @@index([usuario_id])

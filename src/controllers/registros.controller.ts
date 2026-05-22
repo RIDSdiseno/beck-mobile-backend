@@ -292,6 +292,7 @@ export async function createRegistro(req: Request, res: Response) {
         observaciones: normalizeText(observaciones) || null,
         fotos_urls: [],
         estado: "pendiente",
+        devuelto_a_tecnico: false,
         itemizado_sacyr: isJuntaLineal ? null : normalizeText(itemizadoSacyr) || null,
         metros_lineales: isJuntaLineal ? metrosLinealesParsed.value! : null,
         tipo_registro: normalizedTipoRegistro,
@@ -317,6 +318,9 @@ export async function getMisRegistros(req: Request, res: Response) {
   try {
     const userId = req.user?.id;
     const userRole = req.user?.rol;
+    const obraId = typeof req.query.obraId === "string" ? req.query.obraId : undefined;
+    const estado = typeof req.query.estado === "string" ? req.query.estado : undefined;
+    const scope = typeof req.query.scope === "string" ? req.query.scope : undefined;
 
     if (!userId) {
       return res.status(401).json({
@@ -328,11 +332,11 @@ export async function getMisRegistros(req: Request, res: Response) {
     const where =
       userRole === "jefeobra"
         ? {
+            ...(obraId ? { obra_id: obraId } : {}),
+            ...(estado ? { estado: estado as any } : {}),
             obras: {
-              usuarios_obras: {
-                some: {
-                  usuario_id: userId,
-                },
+              estado: {
+                in: [EstadoObra.activa, EstadoObra.pausada],
               },
             },
             usuarios: {
@@ -341,6 +345,18 @@ export async function getMisRegistros(req: Request, res: Response) {
           }
         : {
             usuario_id: userId,
+            ...(estado ? { estado: estado as any } : {}),
+            ...(scope === "registro"
+              ? {
+                  OR: [
+                    { estado: "pendiente" as const },
+                    {
+                      estado: "rechazado" as const,
+                      devuelto_a_tecnico: true,
+                    },
+                  ],
+                }
+              : {}),
           };
 
     const registros = await prisma.registros_terreno.findMany({
@@ -389,6 +405,260 @@ export async function getMisRegistros(req: Request, res: Response) {
     return res.status(500).json({
       success: false,
       error: "No se pudieron obtener los registros",
+    });
+  }
+}
+
+export async function updateRegistroTecnico(req: Request, res: Response) {
+  try {
+    const registroId = getParamValue(req.params.id);
+    const userId = req.user?.id;
+    const userRole = req.user?.rol;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: "Usuario no autenticado",
+      });
+    }
+
+    if (!registroId) {
+      return res.status(400).json({
+        success: false,
+        error: "Falta id del registro",
+      });
+    }
+
+    if (userRole !== "terreno") {
+      return res.status(403).json({
+        success: false,
+        error: "Solo el técnico terreno puede reenviar este registro",
+      });
+    }
+
+    const currentRegistro = await prisma.registros_terreno.findUnique({
+      where: { id: registroId },
+    });
+
+    if (!currentRegistro) {
+      return res.status(404).json({
+        success: false,
+        error: "Registro no encontrado",
+      });
+    }
+
+    if (currentRegistro.usuario_id !== userId || currentRegistro.estado !== "rechazado") {
+      return res.status(403).json({
+        success: false,
+        error: "Solo puedes editar registros rechazados propios",
+      });
+    }
+
+    const hasObraAccess = await canAccessObra(userId, userRole, currentRegistro.obra_id);
+
+    if (!hasObraAccess) {
+      return res.status(403).json({
+        success: false,
+        error: "La obra del registro no esta disponible para reenviar",
+      });
+    }
+
+    const {
+      fecha,
+      descripcionMaterial,
+      modulo,
+      piso,
+      ejeNumerico,
+      ejeAlfabetico,
+      numeroSello,
+      cantidadSellos,
+      nombreSellador,
+      holgura,
+      accesibilidad,
+      observaciones,
+      itemizadoSacyr,
+      tipoRegistro,
+      metrosLineales,
+    } = req.body ?? {};
+
+    const normalizedTipoRegistro =
+      normalizeText(tipoRegistro) || currentRegistro.tipo_registro || "sello_cortafuego";
+    const isJuntaLineal = normalizedTipoRegistro === "junta_lineal_espuma";
+
+    if (!["sello_cortafuego", "junta_lineal_espuma"].includes(normalizedTipoRegistro)) {
+      return res.status(400).json({
+        success: false,
+        error: "tipoRegistro no válido",
+      });
+    }
+
+    const fechaDate =
+      fecha === undefined || fecha === null || normalizeText(fecha) === ""
+        ? currentRegistro.fecha
+        : new Date(fecha);
+
+    if (Number.isNaN(fechaDate.getTime())) {
+      return res.status(400).json({
+        success: false,
+        error: "La fecha es inválida",
+      });
+    }
+
+    const cantidadSellosParsed = isJuntaLineal
+      ? { value: 1, error: null }
+      : parsePositiveInteger(cantidadSellos ?? currentRegistro.cantidad_sellos, "cantidadSellos");
+    const holguraParsed = isJuntaLineal
+      ? { value: 0, error: null }
+      : parseNonNegativeNumber(holgura ?? currentRegistro.holgura, "holgura");
+    const accesibilidadParsed = isJuntaLineal
+      ? { value: 1, error: null }
+      : parsePositiveInteger(accesibilidad ?? currentRegistro.accesibilidad, "accesibilidad");
+    const metrosLinealesParsed = isJuntaLineal
+      ? parsePositiveNumber(metrosLineales ?? currentRegistro.metros_lineales, "longitud")
+      : { value: null, error: null };
+    const numericErrors = [
+      cantidadSellosParsed.error,
+      holguraParsed.error,
+      accesibilidadParsed.error,
+      metrosLinealesParsed.error,
+    ].filter(Boolean);
+
+    if (numericErrors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        error: numericErrors.join(". "),
+      });
+    }
+
+    const registro = await prisma.registros_terreno.update({
+      where: { id: registroId },
+      data: {
+        fecha: fechaDate,
+        dia_semana: getDiaSemana(fechaDate),
+        descripcion_material: isJuntaLineal
+          ? "Junta Lineal Espuma"
+          : normalizeText(descripcionMaterial) || currentRegistro.descripcion_material,
+        modulo: normalizeText(modulo) || currentRegistro.modulo,
+        piso: normalizeText(piso) || currentRegistro.piso,
+        eje_numerico: normalizeText(ejeNumerico) || currentRegistro.eje_numerico,
+        eje_alfabetico: normalizeText(ejeAlfabetico) || currentRegistro.eje_alfabetico,
+        numero_sello: isJuntaLineal
+          ? "N/A"
+          : normalizeText(numeroSello) || currentRegistro.numero_sello,
+        cantidad_sellos: cantidadSellosParsed.value!,
+        nombre_sellador: normalizeText(nombreSellador) || currentRegistro.nombre_sellador,
+        holgura: holguraParsed.value!,
+        accesibilidad: accesibilidadParsed.value!,
+        observaciones: normalizeText(observaciones) || null,
+        itemizado_sacyr: isJuntaLineal
+          ? null
+          : normalizeText(itemizadoSacyr) || currentRegistro.itemizado_sacyr,
+        metros_lineales: isJuntaLineal ? metrosLinealesParsed.value! : null,
+        tipo_registro: normalizedTipoRegistro,
+        estado: "pendiente",
+        devuelto_a_tecnico: false,
+        updated_at: new Date(),
+      },
+    });
+
+    return res.json({
+      success: true,
+      data: registro,
+      message: "Registro corregido y enviado al jefe de obra",
+    });
+  } catch (error) {
+    console.error("UPDATE REGISTRO TECNICO ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No se pudo reenviar el registro",
+    });
+  }
+}
+
+export async function devolverRegistroATecnico(req: Request, res: Response) {
+  try {
+    const registroId = getParamValue(req.params.id);
+    const userId = req.user?.id;
+    const userRole = req.user?.rol;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: "Usuario no autenticado",
+      });
+    }
+
+    if (!registroId) {
+      return res.status(400).json({
+        success: false,
+        error: "Falta id del registro",
+      });
+    }
+
+    if (userRole !== "jefeobra" && !isAdmin(userRole)) {
+      return res.status(403).json({
+        success: false,
+        error: "Solo jefe de obra puede enviar registros al técnico",
+      });
+    }
+
+    const currentRegistro = await prisma.registros_terreno.findUnique({
+      where: { id: registroId },
+      include: {
+        usuarios: {
+          select: {
+            rol: true,
+          },
+        },
+      },
+    });
+
+    if (!currentRegistro) {
+      return res.status(404).json({
+        success: false,
+        error: "Registro no encontrado",
+      });
+    }
+
+    if (currentRegistro.estado !== "rechazado") {
+      return res.status(400).json({
+        success: false,
+        error: "Solo se pueden enviar al técnico registros rechazados",
+      });
+    }
+
+    if (userRole === "jefeobra") {
+      const hasAccess = await canAccessObra(userId, userRole, currentRegistro.obra_id);
+
+      if (!hasAccess || currentRegistro.usuarios.rol !== "terreno") {
+        return res.status(403).json({
+          success: false,
+          error: "No tienes permisos para enviar este registro al técnico",
+        });
+      }
+    }
+
+    const registro = await prisma.registros_terreno.update({
+      where: { id: registroId },
+      data: {
+        estado: "rechazado",
+        devuelto_a_tecnico: true,
+        updated_at: new Date(),
+      },
+    });
+
+    return res.json({
+      success: true,
+      data: registro,
+      message: "Registro disponible para corrección del técnico",
+    });
+  } catch (error) {
+    console.error("DEVOLVER REGISTRO TECNICO ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No se pudo enviar el registro al técnico",
     });
   }
 }
@@ -551,6 +821,7 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
         metros_lineales: isJuntaLineal ? metrosLinealesParsed.value! : null,
         tipo_registro: normalizedTipoRegistro,
         estado: "en_revision",
+        devuelto_a_tecnico: false,
         updated_at: new Date(),
       },
     });
