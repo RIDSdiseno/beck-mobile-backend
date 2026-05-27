@@ -31,3 +31,9 @@ export function uploadBufferToCloudinary(
     streamifier.createReadStream(buffer).pipe(uploadStream);
   });
 }
+
+export function deleteImageFromCloudinary(publicId: string) {
+  return cloudinary.uploader.destroy(publicId, {
+    resource_type: "image",
+  });
+}

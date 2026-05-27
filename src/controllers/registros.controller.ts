@@ -1,7 +1,10 @@
 import { Request, Response } from "express";
 import { EstadoObra } from "@prisma/client";
 import { prisma } from "../config/prisma";
-import { uploadBufferToCloudinary } from "../services/cloudinary.service";
+import {
+  deleteImageFromCloudinary,
+  uploadBufferToCloudinary,
+} from "../services/cloudinary.service";
 
 function getDiaSemana(fecha: Date) {
   const dias = [
@@ -916,6 +919,7 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
     const userId = req.user?.id;
     const userRole = req.user?.rol;
     const files = req.files as Express.Multer.File[] | undefined;
+    const replaceExisting = req.query.replace === "true";
 
     if (!userId) {
       return res.status(401).json({
@@ -935,6 +939,13 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
       return res.status(400).json({
         success: false,
         error: "Debes enviar al menos una foto",
+      });
+    }
+
+    if (replaceExisting && userRole !== "jefeobra" && !isAdmin(userRole)) {
+      return res.status(403).json({
+        success: false,
+        error: "Solo jefe de obra puede reemplazar fotografias",
       });
     }
 
@@ -977,6 +988,12 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
       req.user?.nombre
     );
 
+    const fotosExistentes = replaceExisting
+      ? await prisma.fotos_registro.findMany({
+          where: { registro_id: registro.id },
+          select: { id: true, public_id: true },
+        })
+      : [];
     const uploadedFotos = [];
 
     for (const file of files) {
@@ -999,10 +1016,28 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
       uploadedFotos.push(foto);
     }
 
+    if (replaceExisting && fotosExistentes.length) {
+      await prisma.fotos_registro.deleteMany({
+        where: {
+          id: {
+            in: fotosExistentes.map((foto) => foto.id),
+          },
+        },
+      });
+
+      await Promise.allSettled(
+        fotosExistentes.map((foto) =>
+          deleteImageFromCloudinary(foto.public_id)
+        )
+      );
+    }
+
     return res.json({
       success: true,
       data: uploadedFotos,
-      message: "Fotos subidas correctamente",
+      message: replaceExisting
+        ? "Fotografias reemplazadas correctamente"
+        : "Fotos subidas correctamente",
     });
   } catch (error) {
     console.error("UPLOAD REGISTRO FOTOS ERROR:", error);
