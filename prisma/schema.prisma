@@ -299,37 +299,49 @@ model procesamiento_ingenieria {
 }
 
 model registros_terreno {
-  id                       String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  obra_id                  String                    @db.Uuid
-  usuario_id               String                    @db.Uuid
-  fecha                    DateTime                  @db.Date
-  dia_semana               String                    @db.VarChar(20)
-  descripcion_material     String                    @db.VarChar(500)
-  modulo                   String                    @db.VarChar(100)
-  piso                     String                    @db.VarChar(50)
-  eje_numerico             String                    @db.VarChar(50)
-  eje_alfabetico           String                    @db.VarChar(10)
-  numero_sello             String                    @db.VarChar(100)
-  cantidad_sellos          Int
-  nombre_sellador          String                    @db.VarChar(255)
-  holgura                  Decimal                   @db.Decimal(3, 1)
-  accesibilidad            Int
-  observaciones            String?
-  fotos_urls               String[]
-  created_at               DateTime                  @default(now()) @db.Timestamp(6)
-  updated_at               DateTime                  @default(now()) @db.Timestamp(6)
-  estado                   EstadoRegistroTerreno     @default(pendiente)
-  metros_lineales          Float?
-  tipo_registro            String                    @default("sello_cortafuego") @db.VarChar(50)
-  itemizado_sacyr          String?                   @db.VarChar(255)
-  devuelto_a_tecnico       Boolean                   @default(false)
-  codigo_beck              String?
-  itemizado_mandante_id    String?                   @db.Uuid
-  fotos                    fotos_registro[]
-  procesamiento_ingenieria procesamiento_ingenieria?
-  itemizados_mandante      itemizados_mandante?      @relation(fields: [itemizado_mandante_id], references: [id])
-  obras                    obras                     @relation(fields: [obra_id], references: [id], onDelete: Cascade)
-  usuarios                 usuarios                  @relation(fields: [usuario_id], references: [id])
+  id                           String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  obra_id                      String                    @db.Uuid
+  usuario_id                   String                    @db.Uuid
+  fecha                        DateTime                  @db.Date
+  dia_semana                   String                    @db.VarChar(20)
+  descripcion_material         String                    @db.VarChar(500)
+  modulo                       String                    @db.VarChar(100)
+  piso                         String                    @db.VarChar(50)
+  eje_numerico                 String                    @db.VarChar(50)
+  eje_alfabetico               String                    @db.VarChar(10)
+  numero_sello                 String                    @db.VarChar(100)
+  cantidad_sellos              Int
+  nombre_sellador              String                    @db.VarChar(255)
+  holgura                      Decimal                   @db.Decimal(3, 1)
+  accesibilidad                Int
+  observaciones                String?
+  fotos_urls                   String[]
+  created_at                   DateTime                  @default(now()) @db.Timestamp(6)
+  updated_at                   DateTime                  @default(now()) @db.Timestamp(6)
+  estado                       EstadoRegistroTerreno     @default(pendiente)
+  metros_lineales              Float?
+  tipo_registro                String                    @default("sello_cortafuego") @db.VarChar(50)
+  itemizado_sacyr              String?                   @db.VarChar(255)
+  devuelto_a_tecnico           Boolean                   @default(false)
+  codigo_beck                  String?
+  itemizado_mandante_id        String?                   @db.Uuid
+  itemizado_beck               String?                   @db.VarChar(500)
+  itemizado_mandante           String?                   @db.VarChar(255)
+  foto_url                     String?
+  recinto                      String?                   @db.VarChar(100)
+  factor_por_holguras          Decimal?                  @db.Decimal(6, 2)
+  cielo_modular                Int?
+  cantidad_sellos_con_factores Decimal?                  @db.Decimal(12, 2)
+  aislacion                    Decimal?                  @db.Decimal(6, 2)
+  cantidad_sellos_aislacion    Decimal?                  @db.Decimal(12, 2)
+  reparacion_tabique           Decimal?                  @db.Decimal(6, 2)
+  cantidad_final               Decimal?                  @db.Decimal(12, 2)
+  folio                        String?                   @db.VarChar(100)
+  fotos                        fotos_registro[]
+  procesamiento_ingenieria     procesamiento_ingenieria?
+  itemizados_mandante          itemizados_mandante?      @relation(fields: [itemizado_mandante_id], references: [id])
+  obras                        obras                     @relation(fields: [obra_id], references: [id], onDelete: Cascade)
+  usuarios                     usuarios                  @relation(fields: [usuario_id], references: [id])
 
   @@index([estado])
   @@index([devuelto_a_tecnico])
