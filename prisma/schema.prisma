@@ -145,6 +145,19 @@ model funnel_beck {
   responsable_traspaso_operaciones      String?                       @db.VarChar(255)
   traspasado_administracion             Boolean?
   traspasado_operaciones                Boolean?
+  direccion_proyecto                    String?
+  observaciones                         String?
+  unidad_negocio                        String?                       @db.VarChar(150)
+  observacion_campos_faltantes          String?
+  urgencia                              String?                       @db.VarChar(50)
+  duracion_estimada                     String?                       @db.VarChar(100)
+  empresa_mandante                      String?
+  estado_documentacion_venta            String?                       @db.VarChar(100)
+  estado_revision_tecnica               String?                       @db.VarChar(50)
+  garantias_requeridas                  String?
+  necesidad_levantamiento               Boolean?
+  oficina_tecnica_asignada              String?                       @db.VarChar(255)
+  tipo_proyecto                         String?                       @db.VarChar(100)
   cotizaciones                          cotizaciones[]
   clientes_beck                         clientes_beck?                @relation(fields: [cliente_beck_id], references: [id])
   contactos_cliente_beck                contactos_cliente_beck?       @relation(fields: [contacto_beck_id], references: [id])
@@ -299,49 +312,59 @@ model procesamiento_ingenieria {
 }
 
 model registros_terreno {
-  id                           String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  obra_id                      String                    @db.Uuid
-  usuario_id                   String                    @db.Uuid
-  fecha                        DateTime                  @db.Date
-  dia_semana                   String                    @db.VarChar(20)
-  descripcion_material         String                    @db.VarChar(500)
-  modulo                       String                    @db.VarChar(100)
-  piso                         String                    @db.VarChar(50)
-  eje_numerico                 String                    @db.VarChar(50)
-  eje_alfabetico               String                    @db.VarChar(10)
-  numero_sello                 String                    @db.VarChar(100)
-  cantidad_sellos              Int
-  nombre_sellador              String                    @db.VarChar(255)
-  holgura                      Decimal                   @db.Decimal(3, 1)
-  accesibilidad                Int
-  observaciones                String?
-  fotos_urls                   String[]
-  created_at                   DateTime                  @default(now()) @db.Timestamp(6)
-  updated_at                   DateTime                  @default(now()) @db.Timestamp(6)
-  estado                       EstadoRegistroTerreno     @default(pendiente)
-  metros_lineales              Float?
-  tipo_registro                String                    @default("sello_cortafuego") @db.VarChar(50)
-  itemizado_sacyr              String?                   @db.VarChar(255)
-  devuelto_a_tecnico           Boolean                   @default(false)
-  codigo_beck                  String?
-  itemizado_mandante_id        String?                   @db.Uuid
-  itemizado_beck               String?                   @db.VarChar(500)
-  itemizado_mandante           String?                   @db.VarChar(255)
-  foto_url                     String?
-  recinto                      String?                   @db.VarChar(100)
-  factor_por_holguras          Decimal?                  @db.Decimal(6, 2)
-  cielo_modular                Int?
-  cantidad_sellos_con_factores Decimal?                  @db.Decimal(12, 2)
-  aislacion                    Decimal?                  @db.Decimal(6, 2)
-  cantidad_sellos_aislacion    Decimal?                  @db.Decimal(12, 2)
-  reparacion_tabique           Decimal?                  @db.Decimal(6, 2)
-  cantidad_final               Decimal?                  @db.Decimal(12, 2)
-  folio                        String?                   @db.VarChar(100)
-  fotos                        fotos_registro[]
-  procesamiento_ingenieria     procesamiento_ingenieria?
-  itemizados_mandante          itemizados_mandante?      @relation(fields: [itemizado_mandante_id], references: [id])
-  obras                        obras                     @relation(fields: [obra_id], references: [id], onDelete: Cascade)
-  usuarios                     usuarios                  @relation(fields: [usuario_id], references: [id])
+  id                                                    String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  obra_id                                               String                    @db.Uuid
+  usuario_id                                            String                    @db.Uuid
+  fecha                                                 DateTime                  @db.Date
+  dia_semana                                            String                    @db.VarChar(20)
+  descripcion_material                                  String                    @db.VarChar(500)
+  modulo                                                String                    @db.VarChar(100)
+  piso                                                  String                    @db.VarChar(50)
+  eje_numerico                                          String                    @db.VarChar(50)
+  eje_alfabetico                                        String                    @db.VarChar(10)
+  numero_sello                                          String                    @db.VarChar(100)
+  cantidad_sellos                                       Int
+  nombre_sellador                                       String                    @db.VarChar(255)
+  holgura                                               Decimal                   @db.Decimal(3, 1)
+  accesibilidad                                         Int
+  observaciones                                         String?
+  fotos_urls                                            String[]
+  created_at                                            DateTime                  @default(now()) @db.Timestamp(6)
+  updated_at                                            DateTime                  @default(now()) @db.Timestamp(6)
+  estado                                                EstadoRegistroTerreno     @default(pendiente)
+  metros_lineales                                       Float?
+  tipo_registro                                         String                    @default("sello_cortafuego") @db.VarChar(50)
+  itemizado_sacyr                                       String?                   @db.VarChar(255)
+  devuelto_a_tecnico                                    Boolean                   @default(false)
+  codigo_beck                                           String?
+  itemizado_mandante_id                                 String?                   @db.Uuid
+  itemizado_beck                                        String?                   @db.VarChar(500)
+  itemizado_mandante                                    String?                   @db.VarChar(255)
+  foto_url                                              String?
+  recinto                                               String?                   @db.VarChar(100)
+  factor_por_holguras                                   Decimal?                  @db.Decimal(6, 2)
+  cielo_modular                                         Int?
+  cantidad_sellos_con_factores                          Decimal?                  @db.Decimal(12, 2)
+  aislacion                                             Decimal?                  @db.Decimal(6, 2)
+  cantidad_sellos_aislacion                             Decimal?                  @db.Decimal(12, 2)
+  reparacion_tabique                                    Decimal?                  @db.Decimal(6, 2)
+  cantidad_final                                        Decimal?                  @db.Decimal(12, 2)
+  folio                                                 String?                   @db.VarChar(100)
+  corregido_at                                          DateTime?                 @db.Timestamp(6)
+  fecha_rechazo                                         DateTime?                 @db.Timestamp(6)
+  motivo_rechazo                                        String?
+  rechazado_por_id                                      String?                   @db.Uuid
+  reenviado_revision_at                                 DateTime?                 @db.Timestamp(6)
+  es_correccion                                         Boolean                   @default(false)
+  registro_origen_id                                    String?                   @db.Uuid
+  fotos                                                 fotos_registro[]
+  procesamiento_ingenieria                              procesamiento_ingenieria?
+  itemizados_mandante                                   itemizados_mandante?      @relation(fields: [itemizado_mandante_id], references: [id])
+  obras                                                 obras                     @relation(fields: [obra_id], references: [id], onDelete: Cascade)
+  usuarios_registros_terreno_rechazado_por_idTousuarios usuarios?                 @relation("registros_terreno_rechazado_por_idTousuarios", fields: [rechazado_por_id], references: [id])
+  registros_terreno                                     registros_terreno?        @relation("registros_terrenoToregistros_terreno", fields: [registro_origen_id], references: [id])
+  other_registros_terreno                               registros_terreno[]       @relation("registros_terrenoToregistros_terreno")
+  usuarios                                              usuarios                  @relation(fields: [usuario_id], references: [id])
 
   @@index([estado])
   @@index([devuelto_a_tecnico])
@@ -350,6 +373,9 @@ model registros_terreno {
   @@index([usuario_id])
   @@index([tipo_registro])
   @@index([itemizado_mandante_id])
+  @@index([es_correccion])
+  @@index([rechazado_por_id])
+  @@index([registro_origen_id])
 }
 
 model fotos_registro {
@@ -370,25 +396,26 @@ model fotos_registro {
 }
 
 model usuarios {
-  id                       String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  nombre                   String                     @db.VarChar(255)
-  email                    String                     @unique @db.VarChar(255)
-  password_hash            String?                    @db.VarChar(255)
-  rol                      RolUsuario
-  activo                   Boolean                    @default(true)
-  created_at               DateTime                   @default(now()) @db.Timestamp(6)
-  updated_at               DateTime                   @default(now()) @db.Timestamp(6)
-  azure_id                 String?                    @unique @db.VarChar(255)
-  cotizaciones             cotizaciones[]
-  fotos_registro           fotos_registro[]
-  itemizados               itemizados[]
-  movimientos_crm          movimientos_crm[]
-  movimientos_inventario   movimientos_inventario[]
-  notificaciones           notificaciones[]
-  obras                    obras[]
-  procesamiento_ingenieria procesamiento_ingenieria[]
-  registros_terreno        registros_terreno[]
-  usuarios_obras           usuarios_obras[]
+  id                                                             String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  nombre                                                         String                     @db.VarChar(255)
+  email                                                          String                     @unique @db.VarChar(255)
+  password_hash                                                  String?                    @db.VarChar(255)
+  rol                                                            RolUsuario
+  activo                                                         Boolean                    @default(true)
+  created_at                                                     DateTime                   @default(now()) @db.Timestamp(6)
+  updated_at                                                     DateTime                   @default(now()) @db.Timestamp(6)
+  azure_id                                                       String?                    @unique @db.VarChar(255)
+  cotizaciones                                                   cotizaciones[]
+  fotos_registro                                                 fotos_registro[]
+  itemizados                                                     itemizados[]
+  movimientos_crm                                                movimientos_crm[]
+  movimientos_inventario                                         movimientos_inventario[]
+  notificaciones                                                 notificaciones[]
+  obras                                                          obras[]
+  procesamiento_ingenieria                                       procesamiento_ingenieria[]
+  registros_terreno_registros_terreno_rechazado_por_idTousuarios registros_terreno[]        @relation("registros_terreno_rechazado_por_idTousuarios")
+  registros_terreno                                              registros_terreno[]
+  usuarios_obras                                                 usuarios_obras[]
 
   @@index([activo])
   @@index([email])
@@ -653,6 +680,7 @@ enum TipoMovimientoCRM {
   OBRA_EDITADA
   OBRA_ELIMINADA
   REGISTRO_CREADO
+  PASSWORD_CAMBIADO
 }
 
 enum EstadoSolicitudOficinaTecnica {

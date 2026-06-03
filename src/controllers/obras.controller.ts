@@ -12,6 +12,7 @@ type CampoRegistroConfig = {
 };
 
 const CAMPOS_REGISTRO_JEFEOBRA: CampoRegistroConfig[] = [
+  { campo: "tipo_registro", appCampo: "tipoRegistro", color: "verde" },
   { campo: "codigoBeck", appCampo: "codigoBeck", color: "verde" },
   { campo: "itemizadoBeck", appCampo: "itemizadoBeck", color: "verde" },
   { campo: "itemizadoMandante", appCampo: "itemizadoMandante", color: "verde" },
@@ -26,6 +27,7 @@ const CAMPOS_REGISTRO_JEFEOBRA: CampoRegistroConfig[] = [
   { campo: "modulo", appCampo: "modulo", color: "azul" },
   { campo: "numeroSello", appCampo: "numeroSello", color: "verde" },
   { campo: "cantidadSellos", appCampo: "cantidadSellos", color: "verde" },
+  { campo: "metros_lineales", appCampo: "metrosLineales", color: "verde" },
   { campo: "holgura", appCampo: "holgura", color: "azul" },
   { campo: "factor_por_holguras", appCampo: "factorPorHolguras", color: "azul" },
   { campo: "cielo_modular", appCampo: "cieloModular", color: "azul" },

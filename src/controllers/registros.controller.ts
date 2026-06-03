@@ -446,12 +446,35 @@ export async function getMisRegistros(req: Request, res: Response) {
             created_at: "desc",
           },
         },
+        usuarios_registros_terreno_rechazado_por_idTousuarios: {
+          select: {
+            id: true,
+            nombre: true,
+            email: true,
+            rol: true,
+          },
+        },
+        registros_terreno: {
+          select: {
+            id: true,
+            estado: true,
+            numero_sello: true,
+            descripcion_material: true,
+            motivo_rechazo: true,
+            fecha_rechazo: true,
+          },
+        },
       },
     });
 
     return res.json({
       success: true,
-      data: registros,
+      data: registros.map((registro) => ({
+        ...registro,
+        rechazado_por:
+          registro.usuarios_registros_terreno_rechazado_por_idTousuarios,
+        registro_origen: registro.registros_terreno,
+      })),
     });
   } catch (error) {
     console.error("GET MIS REGISTROS ERROR:", error);
@@ -501,10 +524,16 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
       });
     }
 
-    if (currentRegistro.usuario_id !== userId || currentRegistro.estado !== "rechazado") {
+    const isEditableCorrection =
+      currentRegistro.estado === "rechazado" ||
+      (currentRegistro.estado === "pendiente" &&
+        currentRegistro.es_correccion &&
+        currentRegistro.devuelto_a_tecnico);
+
+    if (currentRegistro.usuario_id !== userId || !isEditableCorrection) {
       return res.status(403).json({
         success: false,
-        error: "Solo puedes editar registros rechazados propios",
+        error: "Solo puedes editar correcciones habilitadas propias",
       });
     }
 
