@@ -158,11 +158,15 @@ model funnel_beck {
   necesidad_levantamiento               Boolean?
   oficina_tecnica_asignada              String?                       @db.VarChar(255)
   tipo_proyecto                         String?                       @db.VarChar(100)
+  reprogramaciones_count                Int                           @default(0)
+  fecha_ultimo_cambio_etapa             DateTime?                     @db.Timestamp(6)
+  es_reactivacion                       Boolean                       @default(false)
   cotizaciones                          cotizaciones[]
   clientes_beck                         clientes_beck?                @relation(fields: [cliente_beck_id], references: [id])
   contactos_cliente_beck                contactos_cliente_beck?       @relation(fields: [contacto_beck_id], references: [id])
   obras                                 obras?                        @relation(fields: [obra_id], references: [id])
   funnel_beck_archivos                  funnel_beck_archivos[]
+  historial_etapas_beck                 historial_etapas_beck[]
   solicitudes_oficina_tecnica           solicitudes_oficina_tecnica[]
 
   @@index([comuna])
@@ -326,7 +330,6 @@ model registros_terreno {
   cantidad_sellos                                       Int
   nombre_sellador                                       String                    @db.VarChar(255)
   holgura                                               Decimal                   @db.Decimal(3, 1)
-  accesibilidad                                         Int
   observaciones                                         String?
   fotos_urls                                            String[]
   created_at                                            DateTime                  @default(now()) @db.Timestamp(6)
@@ -334,7 +337,6 @@ model registros_terreno {
   estado                                                EstadoRegistroTerreno     @default(pendiente)
   metros_lineales                                       Float?
   tipo_registro                                         String                    @default("sello_cortafuego") @db.VarChar(50)
-  itemizado_sacyr                                       String?                   @db.VarChar(255)
   devuelto_a_tecnico                                    Boolean                   @default(false)
   codigo_beck                                           String?
   itemizado_mandante_id                                 String?                   @db.Uuid
@@ -343,7 +345,7 @@ model registros_terreno {
   foto_url                                              String?
   recinto                                               String?                   @db.VarChar(100)
   factor_por_holguras                                   Decimal?                  @db.Decimal(6, 2)
-  cielo_modular                                         Int?
+  accesibilidad                                         Int?
   cantidad_sellos_con_factores                          Decimal?                  @db.Decimal(12, 2)
   aislacion                                             Decimal?                  @db.Decimal(6, 2)
   cantidad_sellos_aislacion                             Decimal?                  @db.Decimal(12, 2)
@@ -405,8 +407,10 @@ model usuarios {
   created_at                                                     DateTime                   @default(now()) @db.Timestamp(6)
   updated_at                                                     DateTime                   @default(now()) @db.Timestamp(6)
   azure_id                                                       String?                    @unique @db.VarChar(255)
+  alertas_vistas                                                 alertas_vistas[]
   cotizaciones                                                   cotizaciones[]
   fotos_registro                                                 fotos_registro[]
+  historial_etapas_beck                                          historial_etapas_beck[]
   itemizados                                                     itemizados[]
   movimientos_crm                                                movimientos_crm[]
   movimientos_inventario                                         movimientos_inventario[]
@@ -561,6 +565,68 @@ model solicitudes_oficina_tecnica {
   @@index([fecha_solicitud])
   @@index([oportunidad_id])
   @@index([responsable_tecnico])
+}
+
+model alertas_vistas {
+  id         Int      @id @default(autoincrement())
+  usuario_id String   @db.Uuid
+  alerta_key String
+  visto_at   DateTime @default(now())
+  created_at DateTime @default(now())
+  usuarios   usuarios @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+
+  @@unique([usuario_id, alerta_key])
+  @@index([alerta_key])
+  @@index([usuario_id])
+}
+
+model configuracion_validacion {
+  id         Int      @id @default(autoincrement())
+  modulo     String   @db.VarChar(50)
+  regla      String   @db.VarChar(100)
+  campo      String   @db.VarChar(100)
+  etiqueta   String   @db.VarChar(255)
+  nivel      String   @default("BLOQUEANTE") @db.VarChar(20)
+  activo     Boolean  @default(true)
+  created_at DateTime @default(now()) @db.Timestamp(6)
+  updated_at DateTime @db.Timestamp(6)
+  etapa      String   @db.VarChar(100)
+
+  @@unique([modulo, regla, etapa])
+  @@index([activo])
+  @@index([etapa])
+  @@index([modulo])
+}
+
+model historial_etapas_beck {
+  id             Int         @id @default(autoincrement())
+  oportunidad_id String      @db.Uuid
+  etapa_anterior String?     @db.VarChar(100)
+  etapa_nueva    String      @db.VarChar(100)
+  usuario_id     String?     @db.Uuid
+  created_at     DateTime    @default(now())
+  funnel_beck    funnel_beck @relation(fields: [oportunidad_id], references: [id], onDelete: Cascade)
+  usuarios       usuarios?   @relation(fields: [usuario_id], references: [id])
+
+  @@index([created_at])
+  @@index([etapa_nueva])
+  @@index([oportunidad_id])
+}
+
+model itemizado_opciones {
+  id               String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  codigo_beck      String?  @db.VarChar(100)
+  tipo             String?  @db.VarChar(100)
+  elemento_pasante String?
+  elemento_penetra String?
+  materialidad     String?  @db.VarChar(150)
+  visible          Boolean  @default(true)
+  created_at       DateTime @default(now()) @db.Timestamp(6)
+  updated_at       DateTime @db.Timestamp(6)
+
+  @@index([codigo_beck])
+  @@index([materialidad])
+  @@index([tipo])
 }
 
 enum EstadoCierreFunnel {

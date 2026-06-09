@@ -30,7 +30,7 @@ const CAMPOS_REGISTRO_JEFEOBRA: CampoRegistroConfig[] = [
   { campo: "metros_lineales", appCampo: "metrosLineales", color: "verde" },
   { campo: "holgura", appCampo: "holgura", color: "azul" },
   { campo: "factor_por_holguras", appCampo: "factorPorHolguras", color: "azul" },
-  { campo: "cielo_modular", appCampo: "cieloModular", color: "azul" },
+  { campo: "accesibilidad", appCampo: "cieloModular", color: "azul" },
   {
     campo: "cantidad_sellos_con_factores",
     appCampo: "cantidadSellosConFactores",

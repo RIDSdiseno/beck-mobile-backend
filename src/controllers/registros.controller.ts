@@ -215,7 +215,7 @@ export async function createRegistro(req: Request, res: Response) {
             numeroSello,
             cantidadSellos,
             holgura,
-            accesibilidad,
+            accesibilidad: accesibilidad ?? cieloModular,
           }),
     };
 
@@ -252,12 +252,10 @@ export async function createRegistro(req: Request, res: Response) {
     const factorHolgurasParsed = isJuntaLineal
       ? { value: null, error: null }
       : parseOptionalNonNegativeNumber(factorHolguras ?? holgura, "factorHolguras");
+    const accesibilidadInput = accesibilidad ?? cieloModular;
     const accesibilidadParsed = isJuntaLineal
-      ? { value: 1, error: null }
-      : parsePositiveInteger(accesibilidad, "accesibilidad");
-    const cieloModularParsed = isJuntaLineal
       ? { value: null, error: null }
-      : parseOptionalNonNegativeNumber(cieloModular, "cieloModular");
+      : parseOptionalNonNegativeNumber(accesibilidadInput, "accesibilidad");
     const metrosLinealesParsed = isJuntaLineal
       ? parsePositiveNumber(metrosLineales, "longitud")
       : { value: null, error: null };
@@ -272,7 +270,6 @@ export async function createRegistro(req: Request, res: Response) {
       holguraParsed.error,
       factorHolgurasParsed.error,
       accesibilidadParsed.error,
-      cieloModularParsed.error,
       metrosLinealesParsed.error,
       aislacionParsed.error,
       reparacionTabiqueParsed.error,
@@ -329,10 +326,9 @@ export async function createRegistro(req: Request, res: Response) {
         nombre_sellador: normalizeText(nombreSellador),
         holgura: holguraParsed.value!,
         factor_por_holguras: factorHolgurasParsed.value,
-        accesibilidad: accesibilidadParsed.value!,
-        cielo_modular:
-          !isJuntaLineal && cieloModular !== undefined
-            ? cieloModularParsed.value
+        accesibilidad:
+          !isJuntaLineal && accesibilidadInput !== undefined
+            ? accesibilidadParsed.value
             : null,
         cantidad_sellos_con_factores:
           !isJuntaLineal && factorHolgurasParsed.value !== null
@@ -344,7 +340,6 @@ export async function createRegistro(req: Request, res: Response) {
         fotos_urls: [],
         estado: "pendiente",
         devuelto_a_tecnico: false,
-        itemizado_sacyr: isJuntaLineal ? null : normalizeText(itemizadoSacyr) || null,
         itemizado_mandante: isJuntaLineal
           ? null
           : normalizeText(itemizadoSacyr) || null,
@@ -603,12 +598,13 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
     const factorHolgurasParsed = isJuntaLineal
       ? { value: null, error: null }
       : parseOptionalNonNegativeNumber(factorHolguras, "factorHolguras");
+    const accesibilidadInput = accesibilidad ?? cieloModular;
     const accesibilidadParsed = isJuntaLineal
-      ? { value: 1, error: null }
-      : parsePositiveInteger(accesibilidad ?? currentRegistro.accesibilidad, "accesibilidad");
-    const cieloModularParsed = isJuntaLineal
       ? { value: null, error: null }
-      : parseOptionalNonNegativeNumber(cieloModular, "cieloModular");
+      : parseOptionalNonNegativeNumber(
+          accesibilidadInput ?? currentRegistro.accesibilidad,
+          "accesibilidad"
+        );
     const metrosLinealesParsed = isJuntaLineal
       ? parsePositiveNumber(metrosLineales ?? currentRegistro.metros_lineales, "longitud")
       : { value: null, error: null };
@@ -623,7 +619,6 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
       holguraParsed.error,
       factorHolgurasParsed.error,
       accesibilidadParsed.error,
-      cieloModularParsed.error,
       metrosLinealesParsed.error,
       aislacionParsed.error,
       reparacionTabiqueParsed.error,
@@ -671,13 +666,12 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
           : factorHolguras !== undefined
             ? factorHolgurasParsed.value
             : currentRegistro.factor_por_holguras,
-        accesibilidad: accesibilidadParsed.value!,
-        cielo_modular:
+        accesibilidad:
           isJuntaLineal
             ? null
-            : cieloModular !== undefined
-              ? cieloModularParsed.value
-              : currentRegistro.cielo_modular,
+            : accesibilidadInput !== undefined
+              ? accesibilidadParsed.value
+              : currentRegistro.accesibilidad,
         cantidad_sellos_con_factores:
           isJuntaLineal
             ? null
@@ -697,9 +691,6 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
               ? reparacionTabiqueParsed.value
               : currentRegistro.reparacion_tabique,
         observaciones: normalizeText(observaciones) || null,
-        itemizado_sacyr: isJuntaLineal
-          ? null
-          : normalizeText(itemizadoSacyr) || currentRegistro.itemizado_sacyr,
         itemizado_mandante: isJuntaLineal
           ? null
           : normalizeText(itemizadoSacyr) || currentRegistro.itemizado_mandante,
@@ -930,15 +921,13 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
     const factorHolgurasParsed = isJuntaLineal
       ? { value: null, error: null }
       : parseOptionalNonNegativeNumber(factorHolguras, "factorHolguras");
+    const accesibilidadInput = accesibilidad ?? cieloModular;
     const accesibilidadParsed = isJuntaLineal
-      ? { value: 1, error: null }
-      : parsePositiveInteger(
-          accesibilidad ?? currentRegistro.accesibilidad,
+      ? { value: null, error: null }
+      : parseOptionalNonNegativeNumber(
+          accesibilidadInput ?? currentRegistro.accesibilidad,
           "accesibilidad"
         );
-    const cieloModularParsed = isJuntaLineal
-      ? { value: null, error: null }
-      : parseOptionalNonNegativeNumber(cieloModular, "cieloModular");
     const metrosLinealesParsed = isJuntaLineal
       ? parsePositiveNumber(
           metrosLineales ?? currentRegistro.metros_lineales,
@@ -956,7 +945,6 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
       holguraParsed.error,
       factorHolgurasParsed.error,
       accesibilidadParsed.error,
-      cieloModularParsed.error,
       metrosLinealesParsed.error,
       aislacionParsed.error,
       reparacionTabiqueParsed.error,
@@ -1004,13 +992,12 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
           : factorHolguras !== undefined
             ? factorHolgurasParsed.value
             : currentRegistro.factor_por_holguras,
-        accesibilidad: accesibilidadParsed.value!,
-        cielo_modular:
+        accesibilidad:
           isJuntaLineal
             ? null
-            : cieloModular !== undefined
-              ? cieloModularParsed.value
-              : currentRegistro.cielo_modular,
+            : accesibilidadInput !== undefined
+              ? accesibilidadParsed.value
+              : currentRegistro.accesibilidad,
         cantidad_sellos_con_factores:
           isJuntaLineal
             ? null
@@ -1031,9 +1018,6 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
               : currentRegistro.reparacion_tabique,
         folio: folio !== undefined ? normalizeText(folio) || null : currentRegistro.folio,
         observaciones: normalizeText(observaciones) || null,
-        itemizado_sacyr: isJuntaLineal
-          ? null
-          : normalizeText(itemizadoSacyr) || currentRegistro.itemizado_sacyr,
         itemizado_mandante: isJuntaLineal
           ? null
           : normalizeText(itemizadoSacyr) || currentRegistro.itemizado_mandante,
