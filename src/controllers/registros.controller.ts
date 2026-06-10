@@ -859,6 +859,79 @@ export async function devolverRegistroATecnico(req: Request, res: Response) {
   }
 }
 
+export async function deleteRegistroPendiente(req: Request, res: Response) {
+  try {
+    const registroId = getParamValue(req.params.id);
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: "Usuario no autenticado",
+      });
+    }
+
+    if (!registroId) {
+      return res.status(400).json({
+        success: false,
+        error: "Falta id del registro",
+      });
+    }
+
+    const registro = await prisma.registros_terreno.findUnique({
+      where: { id: registroId },
+      include: {
+        fotos: {
+          select: {
+            public_id: true,
+          },
+        },
+      },
+    });
+
+    if (!registro) {
+      return res.status(404).json({
+        success: false,
+        error: "Registro no encontrado",
+      });
+    }
+
+    if (registro.usuario_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        error: "No tienes permisos para eliminar este registro",
+      });
+    }
+
+    if (registro.estado !== "pendiente") {
+      return res.status(400).json({
+        success: false,
+        error: "Solo se pueden eliminar registros pendientes",
+      });
+    }
+
+    await prisma.registros_terreno.delete({
+      where: { id: registro.id },
+    });
+
+    await Promise.allSettled(
+      registro.fotos.map((foto) => deleteImageFromCloudinary(foto.public_id))
+    );
+
+    return res.json({
+      success: true,
+      message: "Registro eliminado correctamente",
+    });
+  } catch (error) {
+    console.error("DELETE REGISTRO PENDIENTE ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No se pudo eliminar el registro",
+    });
+  }
+}
+
 export async function updateRegistroJefeObra(req: Request, res: Response) {
   try {
     const registroId = getParamValue(req.params.id);
