@@ -2,6 +2,9 @@ import multer from "multer";
 import { NextFunction, Request, Response } from "express";
 
 const storage = multer.memoryStorage();
+const MAX_REGISTRO_FOTOS = 10;
+const MAX_IMAGE_SIZE_MB = 12;
+const MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024;
 const allowedImageMimeTypes = new Set([
   "image/jpeg",
   "image/png",
@@ -13,7 +16,8 @@ const allowedImageMimeTypes = new Set([
 export const upload = multer({
   storage,
   limits: {
-    fileSize: 5 * 1024 * 1024,
+    fileSize: MAX_IMAGE_SIZE_BYTES,
+    files: MAX_REGISTRO_FOTOS,
   },
   fileFilter: (_req, file, cb) => {
     if (allowedImageMimeTypes.has(file.mimetype)) {
@@ -30,7 +34,7 @@ export function uploadRegistroFotosFiles(
   res: Response,
   next: NextFunction
 ) {
-  upload.array("fotos", 10)(req, res, (error) => {
+  upload.array("fotos", MAX_REGISTRO_FOTOS)(req, res, (error) => {
     if (!error) {
       next();
       return;
@@ -41,8 +45,10 @@ export function uploadRegistroFotosFiles(
         success: false,
         error:
           error.code === "LIMIT_FILE_SIZE"
-            ? "Cada imagen debe pesar 5 MB o menos"
-            : "No se pudieron procesar las imágenes",
+            ? `Cada imagen debe pesar ${MAX_IMAGE_SIZE_MB} MB o menos`
+            : error.code === "LIMIT_FILE_COUNT"
+              ? `Puedes subir hasta ${MAX_REGISTRO_FOTOS} fotografias por registro`
+              : "No se pudieron procesar las imágenes",
       });
     }
 

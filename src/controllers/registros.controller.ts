@@ -457,19 +457,74 @@ export async function getMisRegistros(req: Request, res: Response) {
             descripcion_material: true,
             motivo_rechazo: true,
             fecha_rechazo: true,
+            foto_url: true,
+            fotos_urls: true,
+            fotos: {
+              select: {
+                id: true,
+                url: true,
+                created_at: true,
+              },
+              orderBy: {
+                created_at: "desc",
+              },
+            },
           },
         },
       },
     });
 
+    const normalizeRegistroFotos = (registro: {
+      id: string;
+      foto_url?: string | null;
+      fotos_urls?: string[] | null;
+      fotos?: { id: string; url: string; created_at: Date }[];
+    }) => {
+      const relationFotos = (registro.fotos || []).filter((foto) => foto.url);
+      const fallbackUrls = [
+        ...(Array.isArray(registro.fotos_urls) ? registro.fotos_urls : []),
+        registro.foto_url,
+      ].filter((url): url is string => Boolean(url));
+
+      const seen = new Set<string>();
+      const normalized = [
+        ...relationFotos.map((foto) => ({
+          id: foto.id,
+          url: foto.url,
+          created_at: foto.created_at,
+        })),
+        ...fallbackUrls.map((url, index) => ({
+          id: `${registro.id}-url-${index}`,
+          url,
+          created_at: new Date(0),
+        })),
+      ].filter((foto) => {
+        if (seen.has(foto.url)) return false;
+        seen.add(foto.url);
+        return true;
+      });
+
+      return normalized;
+    };
+
     return res.json({
       success: true,
-      data: registros.map((registro) => ({
-        ...registro,
-        rechazado_por:
-          registro.usuarios_registros_terreno_rechazado_por_idTousuarios,
-        registro_origen: registro.registros_terreno,
-      })),
+      data: registros.map((registro) => {
+        const registroOrigen = registro.registros_terreno
+          ? {
+              ...registro.registros_terreno,
+              fotos: normalizeRegistroFotos(registro.registros_terreno),
+            }
+          : null;
+
+        return {
+          ...registro,
+          fotos: normalizeRegistroFotos(registro),
+          rechazado_por:
+            registro.usuarios_registros_terreno_rechazado_por_idTousuarios,
+          registro_origen: registroOrigen,
+        };
+      }),
     });
   } catch (error) {
     console.error("GET MIS REGISTROS ERROR:", error);
@@ -1194,58 +1249,101 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
           select: { id: true, public_id: true },
         })
       : [];
-    const uploadedFotos = [];
+    const uploadedResults: {
+      secure_url: string;
+      public_id: string;
+      format: string;
+      bytes: number;
+      originalname: string;
+    }[] = [];
 
-    for (const file of files) {
-      const result = await uploadBufferToCloudinary(file.buffer, {
-        folder,
-      });
+    try {
+      for (const file of files) {
+        const result = await uploadBufferToCloudinary(file.buffer, {
+          folder,
+        });
 
-      const foto = await prisma.fotos_registro.create({
-        data: {
-          registro_id: registro.id,
-          url: result.secure_url,
+        uploadedResults.push({
+          secure_url: result.secure_url,
           public_id: result.public_id,
-          nombre_archivo: file.originalname,
-          formato: result.format,
+          format: result.format,
           bytes: result.bytes,
-          subido_por_id: userId || null,
-        },
-      });
+          originalname: file.originalname,
+        });
+      }
 
-      uploadedFotos.push(foto);
-    }
+      const uploadedFotos = await prisma.$transaction(async (tx) => {
+        if (replaceExisting && fotosExistentes.length) {
+          await tx.fotos_registro.deleteMany({
+            where: {
+              id: {
+                in: fotosExistentes.map((foto) => foto.id),
+              },
+            },
+          });
+        }
 
-    if (replaceExisting && fotosExistentes.length) {
-      await prisma.fotos_registro.deleteMany({
-        where: {
-          id: {
-            in: fotosExistentes.map((foto) => foto.id),
+        const createdFotos = [];
+
+        for (const uploaded of uploadedResults) {
+          const foto = await tx.fotos_registro.create({
+            data: {
+              registro_id: registro.id,
+              url: uploaded.secure_url,
+              public_id: uploaded.public_id,
+              nombre_archivo: uploaded.originalname,
+              formato: uploaded.format,
+              bytes: uploaded.bytes,
+              subido_por_id: userId || null,
+            },
+          });
+
+          createdFotos.push(foto);
+        }
+
+        const fotosActuales = await tx.fotos_registro.findMany({
+          where: { registro_id: registro.id },
+          select: { url: true },
+          orderBy: {
+            created_at: "asc",
           },
-        },
+        });
+
+        await tx.registros_terreno.update({
+          where: { id: registro.id },
+          data: {
+            foto_url: fotosActuales[0]?.url || null,
+            fotos_urls: fotosActuales.map((foto) => foto.url),
+          },
+        });
+
+        return createdFotos;
       });
 
+      if (replaceExisting && fotosExistentes.length) {
+        await Promise.allSettled(
+          fotosExistentes.map((foto) =>
+            deleteImageFromCloudinary(foto.public_id)
+          )
+        );
+      }
+
+      return res.json({
+        success: true,
+        data: uploadedFotos,
+        message: replaceExisting
+          ? "Fotografias reemplazadas correctamente"
+          : "Fotos subidas correctamente",
+      });
+    } catch (uploadError) {
       await Promise.allSettled(
-        fotosExistentes.map((foto) =>
+        uploadedResults.map((foto) =>
           deleteImageFromCloudinary(foto.public_id)
         )
       );
+
+      throw uploadError;
     }
-
-    await prisma.registros_terreno.update({
-      where: { id: registro.id },
-      data: {
-        foto_url: uploadedFotos[0].url,
-      },
-    });
-
-    return res.json({
-      success: true,
-      data: uploadedFotos,
-      message: replaceExisting
-        ? "Fotografias reemplazadas correctamente"
-        : "Fotos subidas correctamente",
-    });
   } catch (error) {
     console.error("UPLOAD REGISTRO FOTOS ERROR:", error);
 
