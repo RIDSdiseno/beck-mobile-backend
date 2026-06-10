@@ -1010,9 +1010,12 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
       folio,
       observaciones,
       itemizadoSacyr,
+      codigoBeck,
+      codigo_beck,
       tipoRegistro,
       metrosLineales,
     } = req.body ?? {};
+    const codigoBeckInput = codigoBeck ?? codigo_beck;
 
     const normalizedTipoRegistro =
       normalizeText(tipoRegistro) || currentRegistro.tipo_registro || "sello_cortafuego";
@@ -1149,6 +1152,11 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
         itemizado_mandante: isJuntaLineal
           ? null
           : normalizeText(itemizadoSacyr) || currentRegistro.itemizado_mandante,
+        codigo_beck: isJuntaLineal
+          ? null
+          : codigoBeckInput !== undefined
+            ? normalizeText(codigoBeckInput) || null
+            : currentRegistro.codigo_beck,
         metros_lineales: isJuntaLineal ? metrosLinealesParsed.value! : null,
         tipo_registro: normalizedTipoRegistro,
         estado: "en_revision",
