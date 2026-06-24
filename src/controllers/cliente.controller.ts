@@ -88,6 +88,7 @@ function normalizeRegistroCliente(registro: any) {
   return {
     id: registro.id,
     fecha: registro.fecha,
+    diaSemana: registro.dia_semana,
     tipoRegistro: registro.tipo_registro,
     piso: registro.piso,
     modulo: registro.modulo,
@@ -97,12 +98,39 @@ function normalizeRegistroCliente(registro: any) {
     ejeNumerico: registro.eje_numerico,
     numeroSello: registro.numero_sello,
     cantidad: registro.cantidad_sellos,
+    cantidadSellos: registro.cantidad_sellos,
     cantidadFinal: registro.cantidad_final ? Number(registro.cantidad_final) : null,
     material: registro.descripcion_material,
+    descripcionMaterial: registro.descripcion_material,
+    codigoBeck: registro.codigo_beck,
     sellador: registro.nombre_sellador,
+    nombreSellador: registro.nombre_sellador,
     itemizadoBeck: registro.itemizado_beck,
     itemizadoMandante: registro.itemizado_mandante,
+    holgura: registro.holgura ? Number(registro.holgura) : null,
+    factorPorHolguras: registro.factor_por_holguras
+      ? Number(registro.factor_por_holguras)
+      : null,
+    accesibilidad: registro.accesibilidad,
+    cantidadSellosConFactores: registro.cantidad_sellos_con_factores
+      ? Number(registro.cantidad_sellos_con_factores)
+      : null,
+    aislacion: registro.aislacion ? Number(registro.aislacion) : null,
+    cantidadSellosAislacion: registro.cantidad_sellos_aislacion
+      ? Number(registro.cantidad_sellos_aislacion)
+      : null,
+    reparacionTabique: registro.reparacion_tabique
+      ? Number(registro.reparacion_tabique)
+      : null,
+    folio: registro.folio,
+    metrosLineales:
+      registro.metros_lineales !== null && registro.metros_lineales !== undefined
+        ? Number(registro.metros_lineales)
+        : null,
     observaciones: registro.observaciones,
+    estado: registro.estado,
+    createdAt: registro.created_at,
+    updatedAt: registro.updated_at,
     fotosUrls: Array.isArray(registro.fotos_urls) ? registro.fotos_urls : [],
     fotoUrl: registro.foto_url,
     fotos: normalizeFotos(registro),
@@ -200,7 +228,9 @@ export async function getClienteRegistrosObra(req: Request, res: Response) {
       select: {
         id: true,
         fecha: true,
+        dia_semana: true,
         tipo_registro: true,
+        estado: true,
         piso: true,
         modulo: true,
         recinto: true,
@@ -210,10 +240,22 @@ export async function getClienteRegistrosObra(req: Request, res: Response) {
         cantidad_sellos: true,
         cantidad_final: true,
         descripcion_material: true,
+        codigo_beck: true,
         nombre_sellador: true,
         itemizado_beck: true,
         itemizado_mandante: true,
+        holgura: true,
+        factor_por_holguras: true,
+        accesibilidad: true,
+        cantidad_sellos_con_factores: true,
+        aislacion: true,
+        cantidad_sellos_aislacion: true,
+        reparacion_tabique: true,
+        folio: true,
+        metros_lineales: true,
         observaciones: true,
+        created_at: true,
+        updated_at: true,
         fotos_urls: true,
         foto_url: true,
         fotos: {
