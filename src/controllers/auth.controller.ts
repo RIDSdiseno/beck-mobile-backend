@@ -8,8 +8,7 @@ const ALLOWED_LOGIN_ROLES = new Set([
   "administrador",
   "terreno",
   "jefeobra",
-  "ingenieria",
-  "visualizador",
+  "cliente",
 ]);
 const ALLOWED_EMAIL_DOMAIN = "@becksoluciones.cl";
 
@@ -33,6 +32,10 @@ function canLogin(rol: string) {
 
 function hasAllowedEmailDomain(email: string) {
   return email.toLowerCase().trim().endsWith(ALLOWED_EMAIL_DOMAIN);
+}
+
+function canUseEmailWithRole(email: string, rol: string) {
+  return rol === "cliente" || hasAllowedEmailDomain(email);
 }
 
 function createLoginResponse(usuario: {
@@ -71,10 +74,6 @@ export async function microsoftLogin(req: Request, res: Response) {
 
     const microsoftUser = await verifyMicrosoftIdToken(idToken);
 
-    if (!hasAllowedEmailDomain(microsoftUser.email)) {
-      return unauthorizedLoginResponse(res);
-    }
-
     let usuario = await prisma.usuarios.findFirst({
       where: {
         azure_id: microsoftUser.oid,
@@ -96,6 +95,10 @@ export async function microsoftLogin(req: Request, res: Response) {
     }
 
     if (!canLogin(usuario.rol)) {
+      return unauthorizedLoginResponse(res);
+    }
+
+    if (!canUseEmailWithRole(microsoftUser.email, usuario.rol)) {
       return unauthorizedLoginResponse(res);
     }
 
@@ -132,13 +135,6 @@ export async function emailLogin(req: Request, res: Response) {
       });
     }
 
-    if (!hasAllowedEmailDomain(normalizedEmail)) {
-      return res.status(400).json({
-        success: false,
-        error: "Correo no válido.",
-      });
-    }
-
     const usuario = await prisma.usuarios.findFirst({
       where: {
         email: normalizedEmail,
@@ -155,6 +151,13 @@ export async function emailLogin(req: Request, res: Response) {
 
     if (!canLogin(usuario.rol)) {
       return unauthorizedLoginResponse(res);
+    }
+
+    if (!canUseEmailWithRole(normalizedEmail, usuario.rol)) {
+      return res.status(400).json({
+        success: false,
+        error: "Correo no válido.",
+      });
     }
 
     const passwordMatches = await bcrypt.compare(
