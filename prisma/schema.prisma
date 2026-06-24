@@ -275,26 +275,33 @@ model notificaciones {
 }
 
 model obras {
-  id                            String                          @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  nombre                        String                          @db.VarChar(255)
-  codigo                        String?                         @unique @db.VarChar(100)
-  descripcion                   String?
-  estado                        EstadoObra                      @default(activa)
-  creado_por_id                 String                          @db.Uuid
-  created_at                    DateTime                        @default(now()) @db.Timestamp(6)
-  updated_at                    DateTime                        @default(now()) @db.Timestamp(6)
-  cliente                       String?                         @db.VarChar(255)
-  direccion                     String?
-  configuracion_campos_registro configuracion_campos_registro[]
-  cotizaciones                  cotizaciones[]
-  funnel_beck                   funnel_beck[]
-  usuarios                      usuarios                        @relation(fields: [creado_por_id], references: [id])
-  registros_terreno             registros_terreno[]
-  usuarios_obras                usuarios_obras[]
+  id                                     String                                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  nombre                                 String                                @db.VarChar(255)
+  codigo                                 String?                               @unique @db.VarChar(100)
+  descripcion                            String?
+  estado                                 EstadoObra                            @default(activa)
+  creado_por_id                          String                                @db.Uuid
+  created_at                             DateTime                              @default(now()) @db.Timestamp(6)
+  updated_at                             DateTime                              @default(now()) @db.Timestamp(6)
+  cliente                                String?                               @db.VarChar(255)
+  direccion                              String?
+  cliente_beck_id                        String?                               @db.Uuid
+  rendimiento_sellos_esperado_diario     Int?
+  rendimiento_reparacion_esperado_diario Int?
+  configuracion_campos_registro          configuracion_campos_registro[]
+  configuracion_itemizado_opcion_obra    configuracion_itemizado_opcion_obra[]
+  cotizaciones                           cotizaciones[]
+  funnel_beck                            funnel_beck[]
+  obra_tipos_registro                    obra_tipos_registro[]
+  clientes_beck                          clientes_beck?                        @relation(fields: [cliente_beck_id], references: [id])
+  usuarios                               usuarios                              @relation(fields: [creado_por_id], references: [id])
+  registros_terreno                      registros_terreno[]
+  usuarios_obras                         usuarios_obras[]
 
   @@index([codigo])
   @@index([creado_por_id])
   @@index([estado])
+  @@index([cliente_beck_id])
 }
 
 model procesamiento_ingenieria {
@@ -316,57 +323,62 @@ model procesamiento_ingenieria {
 }
 
 model registros_terreno {
-  id                                                    String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  obra_id                                               String                    @db.Uuid
-  usuario_id                                            String                    @db.Uuid
-  fecha                                                 DateTime                  @db.Date
-  dia_semana                                            String                    @db.VarChar(20)
-  descripcion_material                                  String                    @db.VarChar(500)
-  modulo                                                String                    @db.VarChar(100)
-  piso                                                  String                    @db.VarChar(50)
-  eje_numerico                                          String                    @db.VarChar(50)
-  eje_alfabetico                                        String                    @db.VarChar(10)
-  numero_sello                                          String                    @db.VarChar(100)
-  cantidad_sellos                                       Int
-  nombre_sellador                                       String                    @db.VarChar(255)
-  holgura                                               Decimal                   @db.Decimal(3, 1)
-  observaciones                                         String?
-  fotos_urls                                            String[]
-  created_at                                            DateTime                  @default(now()) @db.Timestamp(6)
-  updated_at                                            DateTime                  @default(now()) @db.Timestamp(6)
-  estado                                                EstadoRegistroTerreno     @default(pendiente)
-  metros_lineales                                       Float?
-  tipo_registro                                         String                    @default("sello_cortafuego") @db.VarChar(50)
-  devuelto_a_tecnico                                    Boolean                   @default(false)
-  codigo_beck                                           String?
-  itemizado_mandante_id                                 String?                   @db.Uuid
-  itemizado_beck                                        String?                   @db.VarChar(500)
-  itemizado_mandante                                    String?                   @db.VarChar(255)
-  foto_url                                              String?
-  recinto                                               String?                   @db.VarChar(100)
-  factor_por_holguras                                   Decimal?                  @db.Decimal(6, 2)
-  accesibilidad                                         Int?
-  cantidad_sellos_con_factores                          Decimal?                  @db.Decimal(12, 2)
-  aislacion                                             Decimal?                  @db.Decimal(6, 2)
-  cantidad_sellos_aislacion                             Decimal?                  @db.Decimal(12, 2)
-  reparacion_tabique                                    Decimal?                  @db.Decimal(6, 2)
-  cantidad_final                                        Decimal?                  @db.Decimal(12, 2)
-  folio                                                 String?                   @db.VarChar(100)
-  corregido_at                                          DateTime?                 @db.Timestamp(6)
-  fecha_rechazo                                         DateTime?                 @db.Timestamp(6)
-  motivo_rechazo                                        String?
-  rechazado_por_id                                      String?                   @db.Uuid
-  reenviado_revision_at                                 DateTime?                 @db.Timestamp(6)
-  es_correccion                                         Boolean                   @default(false)
-  registro_origen_id                                    String?                   @db.Uuid
-  fotos                                                 fotos_registro[]
-  procesamiento_ingenieria                              procesamiento_ingenieria?
-  itemizados_mandante                                   itemizados_mandante?      @relation(fields: [itemizado_mandante_id], references: [id])
-  obras                                                 obras                     @relation(fields: [obra_id], references: [id], onDelete: Cascade)
-  usuarios_registros_terreno_rechazado_por_idTousuarios usuarios?                 @relation("registros_terreno_rechazado_por_idTousuarios", fields: [rechazado_por_id], references: [id])
-  registros_terreno                                     registros_terreno?        @relation("registros_terrenoToregistros_terreno", fields: [registro_origen_id], references: [id])
-  other_registros_terreno                               registros_terreno[]       @relation("registros_terrenoToregistros_terreno")
-  usuarios                                              usuarios                  @relation(fields: [usuario_id], references: [id])
+  id                                                                  String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  obra_id                                                             String                    @db.Uuid
+  usuario_id                                                          String                    @db.Uuid
+  fecha                                                               DateTime                  @db.Date
+  dia_semana                                                          String                    @db.VarChar(20)
+  descripcion_material                                                String                    @db.VarChar(500)
+  modulo                                                              String                    @db.VarChar(100)
+  piso                                                                String                    @db.VarChar(50)
+  eje_numerico                                                        String                    @db.VarChar(50)
+  eje_alfabetico                                                      String                    @db.VarChar(10)
+  numero_sello                                                        String                    @db.VarChar(100)
+  cantidad_sellos                                                     Int
+  nombre_sellador                                                     String                    @db.VarChar(255)
+  holgura                                                             Decimal                   @db.Decimal(3, 1)
+  observaciones                                                       String?
+  fotos_urls                                                          String[]
+  created_at                                                          DateTime                  @default(now()) @db.Timestamp(6)
+  updated_at                                                          DateTime                  @default(now()) @db.Timestamp(6)
+  estado                                                              EstadoRegistroTerreno     @default(pendiente)
+  metros_lineales                                                     Float?
+  tipo_registro                                                       String                    @default("sello_cortafuego") @db.VarChar(50)
+  devuelto_a_tecnico                                                  Boolean                   @default(false)
+  codigo_beck                                                         String?
+  itemizado_mandante_id                                               String?                   @db.Uuid
+  itemizado_beck                                                      String?                   @db.VarChar(500)
+  itemizado_mandante                                                  String?                   @db.VarChar(255)
+  foto_url                                                            String?
+  recinto                                                             String?                   @db.VarChar(100)
+  factor_por_holguras                                                 Decimal?                  @db.Decimal(6, 2)
+  accesibilidad                                                       Int?
+  cantidad_sellos_con_factores                                        Decimal?                  @db.Decimal(12, 2)
+  aislacion                                                           Decimal?                  @db.Decimal(6, 2)
+  cantidad_sellos_aislacion                                           Decimal?                  @db.Decimal(12, 2)
+  reparacion_tabique                                                  Decimal?                  @db.Decimal(6, 2)
+  cantidad_final                                                      Decimal?                  @db.Decimal(12, 2)
+  folio                                                               String?                   @db.VarChar(100)
+  corregido_at                                                        DateTime?                 @db.Timestamp(6)
+  fecha_rechazo                                                       DateTime?                 @db.Timestamp(6)
+  motivo_rechazo                                                      String?
+  rechazado_por_id                                                    String?                   @db.Uuid
+  reenviado_revision_at                                               DateTime?                 @db.Timestamp(6)
+  es_correccion                                                       Boolean                   @default(false)
+  registro_origen_id                                                  String?                   @db.Uuid
+  fecha_seleccion_inspeccion                                          DateTime?                 @db.Timestamp(6)
+  seleccionado_inspeccion_por_id                                      String?                   @db.Uuid
+  seleccionado_para_inspeccion                                        Boolean                   @default(false)
+  controles_inspeccion                                                controles_inspeccion[]
+  fotos                                                               fotos_registro[]
+  procesamiento_ingenieria                                            procesamiento_ingenieria?
+  itemizados_mandante                                                 itemizados_mandante?      @relation(fields: [itemizado_mandante_id], references: [id])
+  obras                                                               obras                     @relation(fields: [obra_id], references: [id], onDelete: Cascade)
+  usuarios_registros_terreno_rechazado_por_idTousuarios               usuarios?                 @relation("registros_terreno_rechazado_por_idTousuarios", fields: [rechazado_por_id], references: [id])
+  registros_terreno                                                   registros_terreno?        @relation("registros_terrenoToregistros_terreno", fields: [registro_origen_id], references: [id])
+  other_registros_terreno                                             registros_terreno[]       @relation("registros_terrenoToregistros_terreno")
+  usuarios_registros_terreno_seleccionado_inspeccion_por_idTousuarios usuarios?                 @relation("registros_terreno_seleccionado_inspeccion_por_idTousuarios", fields: [seleccionado_inspeccion_por_id], references: [id])
+  usuarios                                                            usuarios                  @relation(fields: [usuario_id], references: [id])
 
   @@index([estado])
   @@index([devuelto_a_tecnico])
@@ -378,6 +390,8 @@ model registros_terreno {
   @@index([es_correccion])
   @@index([rechazado_por_id])
   @@index([registro_origen_id])
+  @@index([seleccionado_inspeccion_por_id])
+  @@index([seleccionado_para_inspeccion])
 }
 
 model fotos_registro {
@@ -398,28 +412,31 @@ model fotos_registro {
 }
 
 model usuarios {
-  id                                                             String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  nombre                                                         String                     @db.VarChar(255)
-  email                                                          String                     @unique @db.VarChar(255)
-  password_hash                                                  String?                    @db.VarChar(255)
-  rol                                                            RolUsuario
-  activo                                                         Boolean                    @default(true)
-  created_at                                                     DateTime                   @default(now()) @db.Timestamp(6)
-  updated_at                                                     DateTime                   @default(now()) @db.Timestamp(6)
-  azure_id                                                       String?                    @unique @db.VarChar(255)
-  alertas_vistas                                                 alertas_vistas[]
-  cotizaciones                                                   cotizaciones[]
-  fotos_registro                                                 fotos_registro[]
-  historial_etapas_beck                                          historial_etapas_beck[]
-  itemizados                                                     itemizados[]
-  movimientos_crm                                                movimientos_crm[]
-  movimientos_inventario                                         movimientos_inventario[]
-  notificaciones                                                 notificaciones[]
-  obras                                                          obras[]
-  procesamiento_ingenieria                                       procesamiento_ingenieria[]
-  registros_terreno_registros_terreno_rechazado_por_idTousuarios registros_terreno[]        @relation("registros_terreno_rechazado_por_idTousuarios")
-  registros_terreno                                              registros_terreno[]
-  usuarios_obras                                                 usuarios_obras[]
+  id                                                                           String                     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  nombre                                                                       String                     @db.VarChar(255)
+  email                                                                        String                     @unique @db.VarChar(255)
+  password_hash                                                                String?                    @db.VarChar(255)
+  rol                                                                          RolUsuario
+  activo                                                                       Boolean                    @default(true)
+  created_at                                                                   DateTime                   @default(now()) @db.Timestamp(6)
+  updated_at                                                                   DateTime                   @default(now()) @db.Timestamp(6)
+  azure_id                                                                     String?                    @unique @db.VarChar(255)
+  alertas_vistas                                                               alertas_vistas[]
+  controles_inspeccion                                                         controles_inspeccion[]
+  cotizaciones                                                                 cotizaciones[]
+  fotos_registro                                                               fotos_registro[]
+  historial_etapas_beck                                                        historial_etapas_beck[]
+  itemizados                                                                   itemizados[]
+  movimientos_crm                                                              movimientos_crm[]
+  movimientos_inventario                                                       movimientos_inventario[]
+  notificaciones                                                               notificaciones[]
+  obras                                                                        obras[]
+  permisos_usuario_modulo                                                      permisos_usuario_modulo[]
+  procesamiento_ingenieria                                                     procesamiento_ingenieria[]
+  registros_terreno_registros_terreno_rechazado_por_idTousuarios               registros_terreno[]        @relation("registros_terreno_rechazado_por_idTousuarios")
+  registros_terreno_registros_terreno_seleccionado_inspeccion_por_idTousuarios registros_terreno[]        @relation("registros_terreno_seleccionado_inspeccion_por_idTousuarios")
+  registros_terreno                                                            registros_terreno[]
+  usuarios_obras                                                               usuarios_obras[]
 
   @@index([activo])
   @@index([email])
@@ -476,6 +493,7 @@ model clientes_beck {
   contactos_cliente_beck contactos_cliente_beck[]
   cotizaciones           cotizaciones[]
   funnel_beck            funnel_beck[]
+  obras                  obras[]
 
   @@index([activo])
   @@index([razon_social])
@@ -614,19 +632,116 @@ model historial_etapas_beck {
 }
 
 model itemizado_opciones {
-  id               String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  codigo_beck      String?  @db.VarChar(100)
-  tipo             String?  @db.VarChar(100)
-  elemento_pasante String?
-  elemento_penetra String?
-  materialidad     String?  @db.VarChar(150)
-  visible          Boolean  @default(true)
-  created_at       DateTime @default(now()) @db.Timestamp(6)
-  updated_at       DateTime @db.Timestamp(6)
+  id                                  String                                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  codigo_beck                         String?                               @db.VarChar(100)
+  tipo                                String?                               @db.VarChar(100)
+  elemento_pasante                    String?
+  elemento_penetra                    String?
+  materialidad                        String?                               @db.VarChar(150)
+  visible                             Boolean                               @default(true)
+  created_at                          DateTime                              @default(now()) @db.Timestamp(6)
+  updated_at                          DateTime                              @db.Timestamp(6)
+  configuracion_itemizado_opcion_obra configuracion_itemizado_opcion_obra[]
 
   @@index([codigo_beck])
   @@index([materialidad])
   @@index([tipo])
+}
+
+model configuracion_itemizado_opcion_obra {
+  id                  String             @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  obra_id             String             @db.Uuid
+  itemizado_opcion_id String             @db.Uuid
+  visible             Boolean            @default(true)
+  created_at          DateTime           @default(now()) @db.Timestamp(6)
+  updated_at          DateTime           @db.Timestamp(6)
+  itemizado_opciones  itemizado_opciones @relation(fields: [itemizado_opcion_id], references: [id], onDelete: Cascade)
+  obras               obras              @relation(fields: [obra_id], references: [id], onDelete: Cascade)
+
+  @@unique([obra_id, itemizado_opcion_id])
+  @@index([itemizado_opcion_id])
+  @@index([obra_id])
+}
+
+model controles_inspeccion {
+  id                              String                            @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  registro_terreno_id             String                            @db.Uuid
+  ingeniero_id                    String                            @db.Uuid
+  fecha                           DateTime                          @db.Date
+  ensayo                          String                            @db.VarChar(255)
+  observacion                     String?
+  conformidad                     EstadoConformidadInspeccion?
+  foto_inspeccion_url             String?
+  foto_no_conformidad_url         String?
+  created_at                      DateTime                          @default(now()) @db.Timestamp(6)
+  updated_at                      DateTime                          @default(now()) @db.Timestamp(6)
+  usuarios                        usuarios                          @relation(fields: [ingeniero_id], references: [id])
+  registros_terreno               registros_terreno                 @relation(fields: [registro_terreno_id], references: [id], onDelete: Cascade)
+  controles_inspeccion_parametros controles_inspeccion_parametros[]
+
+  @@index([conformidad])
+  @@index([fecha])
+  @@index([ingeniero_id])
+  @@index([registro_terreno_id])
+}
+
+model controles_inspeccion_parametros {
+  id                    String                       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  control_inspeccion_id String                       @db.Uuid
+  orden                 Int
+  parametro             String                       @db.VarChar(500)
+  resultado             ResultadoParametroInspeccion
+  observacion           String?
+  created_at            DateTime                     @default(now()) @db.Timestamp(6)
+  updated_at            DateTime                     @default(now()) @db.Timestamp(6)
+  controles_inspeccion  controles_inspeccion         @relation(fields: [control_inspeccion_id], references: [id], onDelete: Cascade)
+
+  @@index([control_inspeccion_id])
+  @@index([orden])
+  @@index([resultado])
+}
+
+model obra_tipos_registro {
+  id            String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  obra_id       String   @db.Uuid
+  tipo_registro String   @db.VarChar(50)
+  activo        Boolean  @default(true)
+  created_at    DateTime @default(now()) @db.Timestamp(6)
+  updated_at    DateTime @default(now()) @db.Timestamp(6)
+  obras         obras    @relation(fields: [obra_id], references: [id], onDelete: Cascade)
+
+  @@unique([obra_id, tipo_registro])
+  @@index([obra_id])
+  @@index([tipo_registro])
+}
+
+model permisos_rol_modulo {
+  id           String     @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  rol          RolUsuario
+  modulo       String     @db.VarChar(100)
+  puede_ver    Boolean    @default(false)
+  puede_editar Boolean    @default(false)
+  created_at   DateTime   @default(now()) @db.Timestamp(6)
+  updated_at   DateTime   @default(now()) @db.Timestamp(6)
+
+  @@unique([rol, modulo])
+  @@index([modulo])
+  @@index([rol])
+}
+
+model permisos_usuario_modulo {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  usuario_id   String   @db.Uuid
+  modulo       String   @db.VarChar(100)
+  puede_ver    Boolean  @default(false)
+  puede_editar Boolean  @default(false)
+  created_at   DateTime @default(now()) @db.Timestamp(6)
+  updated_at   DateTime @default(now()) @db.Timestamp(6)
+  usuarios     usuarios @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+
+  @@unique([usuario_id, modulo])
+  @@index([modulo])
+  @@index([usuario_id])
 }
 
 enum EstadoCierreFunnel {
@@ -692,6 +807,7 @@ enum RolUsuario {
   vendedor_firemat
   bodeguero
   visualizador_firemat
+  cliente
 }
 
 enum TipoIndicadorEconomico {
@@ -767,4 +883,15 @@ enum TipoArchivoFunnel {
   ANTICIPO
   DOCUMENTO_RESPALDO
   DOCUMENTO_REQUERIDO
+}
+
+enum EstadoConformidadInspeccion {
+  conforme
+  no_conforme
+}
+
+enum ResultadoParametroInspeccion {
+  cumple
+  no_cumple
+  no_aplica
 }
