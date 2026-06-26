@@ -1,0 +1,778 @@
+import { Request, Response } from "express";
+import { EstadoRegistroTerreno, Prisma } from "@prisma/client";
+import { prisma } from "../config/prisma";
+
+const ESTADOS_INGENIERIA = [
+  EstadoRegistroTerreno.pendiente,
+  EstadoRegistroTerreno.en_revision,
+  EstadoRegistroTerreno.validado,
+  EstadoRegistroTerreno.rechazado,
+];
+
+function isIngenieriaRole(role?: string) {
+  return role === "ingenieria" || role === "administrador";
+}
+
+function getParamValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function normalizeText(value: unknown) {
+  return String(value ?? "").trim();
+}
+
+function parseOptionalDecimal(value: unknown) {
+  if (value === undefined) return undefined;
+  if (value === null || normalizeText(value) === "") return null;
+
+  const parsed = Number(String(value).replace(",", "."));
+  if (!Number.isFinite(parsed)) return undefined;
+
+  return new Prisma.Decimal(parsed);
+}
+
+function parseOptionalInt(value: unknown) {
+  if (value === undefined) return undefined;
+  if (value === null || normalizeText(value) === "") return null;
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return undefined;
+
+  return Math.trunc(parsed);
+}
+
+function normalizeRegistroFotos(registro: {
+  id: string;
+  foto_url?: string | null;
+  fotos_urls?: string[] | null;
+  fotos?: { id: string; url: string; created_at: Date }[];
+}) {
+  const relationFotos = (registro.fotos || []).filter((foto) => foto.url);
+  const fallbackUrls = [
+    ...(Array.isArray(registro.fotos_urls) ? registro.fotos_urls : []),
+    registro.foto_url,
+  ].filter((url): url is string => Boolean(url));
+
+  const seen = new Set<string>();
+
+  return [
+    ...relationFotos.map((foto) => ({
+      id: foto.id,
+      url: foto.url,
+      created_at: foto.created_at,
+    })),
+    ...fallbackUrls.map((url, index) => ({
+      id: `${registro.id}-url-${index}`,
+      url,
+      created_at: new Date(0),
+    })),
+  ].filter((foto) => {
+    if (seen.has(foto.url)) return false;
+    seen.add(foto.url);
+    return true;
+  });
+}
+
+function mapRegistroIngenieria(registro: any) {
+  return {
+    ...registro,
+    fotos: normalizeRegistroFotos(registro),
+    obra: registro.obras ?? null,
+    usuario: registro.usuarios ?? null,
+    rechazado_por:
+      registro.usuarios_registros_terreno_rechazado_por_idTousuarios ?? null,
+    procesamiento: registro.procesamiento_ingenieria ?? null,
+  };
+}
+
+async function findRegistroWithDetails(id: string) {
+  return prisma.registros_terreno.findUnique({
+    where: { id },
+    include: {
+      obras: {
+        select: {
+          id: true,
+          nombre: true,
+          codigo: true,
+          cliente: true,
+          direccion: true,
+        },
+      },
+      usuarios: {
+        select: {
+          id: true,
+          nombre: true,
+          email: true,
+          rol: true,
+        },
+      },
+      fotos: {
+        select: {
+          id: true,
+          url: true,
+          created_at: true,
+        },
+        orderBy: {
+          created_at: "desc",
+        },
+      },
+      procesamiento_ingenieria: true,
+      usuarios_registros_terreno_rechazado_por_idTousuarios: {
+        select: {
+          id: true,
+          nombre: true,
+          email: true,
+          rol: true,
+        },
+      },
+    },
+  });
+}
+
+function ensureIngenieria(req: Request, res: Response) {
+  if (!req.user?.id) {
+    res.status(401).json({
+      success: false,
+      error: "Usuario no autenticado",
+    });
+    return false;
+  }
+
+  if (!isIngenieriaRole(req.user.rol)) {
+    res.status(403).json({
+      success: false,
+      error: "Solo ingeniería puede acceder a este módulo",
+    });
+    return false;
+  }
+
+  return true;
+}
+
+export async function getIngenieriaResumen(req: Request, res: Response) {
+  try {
+    if (!ensureIngenieria(req, res)) return;
+
+    const grouped = await prisma.registros_terreno.groupBy({
+      by: ["estado"],
+      _count: {
+        _all: true,
+      },
+    });
+
+    const counts = grouped.reduce<Record<string, number>>((acc, item) => {
+      acc[item.estado] = item._count._all;
+      return acc;
+    }, {});
+
+    const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
+
+    return res.json({
+      success: true,
+      data: {
+        pendientes: counts.pendiente ?? 0,
+        enRevision: counts.en_revision ?? 0,
+        validados: counts.validado ?? 0,
+        rechazados: counts.rechazado ?? 0,
+        total,
+      },
+    });
+  } catch (error) {
+    console.error("GET INGENIERIA RESUMEN ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No se pudo obtener el resumen de ingeniería",
+    });
+  }
+}
+
+export async function getIngenieriaRegistros(req: Request, res: Response) {
+  try {
+    if (!ensureIngenieria(req, res)) return;
+
+    const estado = normalizeText(req.query.estado);
+    const search = normalizeText(req.query.search).toLowerCase();
+    const limitValue = Number(req.query.limit);
+    const take =
+      Number.isFinite(limitValue) && limitValue > 0
+        ? Math.min(Math.trunc(limitValue), 100)
+        : 80;
+
+    if (estado && !ESTADOS_INGENIERIA.includes(estado as EstadoRegistroTerreno)) {
+      return res.status(400).json({
+        success: false,
+        error: "Estado no válido",
+      });
+    }
+
+    const registros = await prisma.registros_terreno.findMany({
+      where: {
+        ...(estado ? { estado: estado as EstadoRegistroTerreno } : {}),
+        ...(search
+          ? {
+              OR: [
+                { folio: { contains: search, mode: "insensitive" } },
+                { codigo_beck: { contains: search, mode: "insensitive" } },
+                { itemizado_beck: { contains: search, mode: "insensitive" } },
+                { descripcion_material: { contains: search, mode: "insensitive" } },
+                { numero_sello: { contains: search, mode: "insensitive" } },
+                { nombre_sellador: { contains: search, mode: "insensitive" } },
+                {
+                  obras: {
+                    nombre: { contains: search, mode: "insensitive" },
+                  },
+                },
+                {
+                  obras: {
+                    codigo: { contains: search, mode: "insensitive" },
+                  },
+                },
+                {
+                  usuarios: {
+                    nombre: { contains: search, mode: "insensitive" },
+                  },
+                },
+              ],
+            }
+          : {}),
+      },
+      orderBy: {
+        created_at: "desc",
+      },
+      take,
+      include: {
+        obras: {
+          select: {
+            id: true,
+            nombre: true,
+            codigo: true,
+            cliente: true,
+            direccion: true,
+          },
+        },
+        usuarios: {
+          select: {
+            id: true,
+            nombre: true,
+            email: true,
+            rol: true,
+          },
+        },
+        fotos: {
+          select: {
+            id: true,
+            url: true,
+            created_at: true,
+          },
+          orderBy: {
+            created_at: "desc",
+          },
+        },
+        procesamiento_ingenieria: true,
+        usuarios_registros_terreno_rechazado_por_idTousuarios: {
+          select: {
+            id: true,
+            nombre: true,
+            email: true,
+            rol: true,
+          },
+        },
+      },
+    });
+
+    return res.json({
+      success: true,
+      data: registros.map(mapRegistroIngenieria),
+    });
+  } catch (error) {
+    console.error("GET INGENIERIA REGISTROS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No se pudieron obtener los registros de ingeniería",
+    });
+  }
+}
+
+export async function iniciarRevisionIngenieria(req: Request, res: Response) {
+  try {
+    if (!ensureIngenieria(req, res)) return;
+
+    const registroId = getParamValue(req.params.id);
+
+    if (!registroId) {
+      return res.status(400).json({
+        success: false,
+        error: "Falta id del registro",
+      });
+    }
+
+    const currentRegistro = await prisma.registros_terreno.findUnique({
+      where: { id: registroId },
+    });
+
+    if (!currentRegistro) {
+      return res.status(404).json({
+        success: false,
+        error: "Registro no encontrado",
+      });
+    }
+
+    if (currentRegistro.estado !== EstadoRegistroTerreno.pendiente) {
+      return res.status(400).json({
+        success: false,
+        error: "Solo se puede iniciar revisión de un registro pendiente",
+      });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.registros_terreno.update({
+        where: { id: registroId },
+        data: {
+          estado: EstadoRegistroTerreno.en_revision,
+          devuelto_a_tecnico: false,
+          updated_at: new Date(),
+        },
+      });
+
+      await tx.procesamiento_ingenieria.upsert({
+        where: { registro_terreno_id: registroId },
+        create: {
+          registro_terreno_id: registroId,
+          usuario_id: req.user!.id,
+        },
+        update: {
+          usuario_id: req.user!.id,
+          procesado_at: new Date(),
+        },
+      });
+    });
+
+    const registro = await findRegistroWithDetails(registroId);
+
+    return res.json({
+      success: true,
+      data: mapRegistroIngenieria(registro),
+      message: "Registro en revisión",
+    });
+  } catch (error) {
+    console.error("INICIAR REVISION INGENIERIA ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No se pudo iniciar la revisión",
+    });
+  }
+}
+
+export async function updateRegistroIngenieria(req: Request, res: Response) {
+  try {
+    if (!ensureIngenieria(req, res)) return;
+
+    const registroId = getParamValue(req.params.id);
+
+    if (!registroId) {
+      return res.status(400).json({
+        success: false,
+        error: "Falta id del registro",
+      });
+    }
+
+    const currentRegistro = await prisma.registros_terreno.findUnique({
+      where: { id: registroId },
+    });
+
+    if (!currentRegistro) {
+      return res.status(404).json({
+        success: false,
+        error: "Registro no encontrado",
+      });
+    }
+
+    const data: Prisma.registros_terrenoUpdateInput = {};
+    const {
+      codigoBeck,
+      codigo_beck,
+      itemizadoBeck,
+      descripcionMaterial,
+      descripcion_material,
+      recinto,
+      modulo,
+      piso,
+      ejeNumerico,
+      eje_numerico,
+      ejeAlfabetico,
+      eje_alfabetico,
+      numeroSello,
+      numero_sello,
+      cantidadSellos,
+      cantidad_sellos,
+      nombreSellador,
+      nombre_sellador,
+      holgura,
+      accesibilidad,
+      aislacion,
+      reparacionTabique,
+      reparacion_tabique,
+      folio,
+      observaciones,
+      itemizadoMandante,
+      itemizado_mandante,
+    } = req.body ?? {};
+
+    const codigoBeckInput = codigoBeck ?? codigo_beck;
+    const itemizadoBeckInput =
+      itemizadoBeck ?? descripcionMaterial ?? descripcion_material;
+    const ejeNumericoInput = ejeNumerico ?? eje_numerico;
+    const ejeAlfabeticoInput = ejeAlfabetico ?? eje_alfabetico;
+    const numeroSelloInput = numeroSello ?? numero_sello;
+    const cantidadSellosInput = cantidadSellos ?? cantidad_sellos;
+    const nombreSelladorInput = nombreSellador ?? nombre_sellador;
+    const reparacionTabiqueInput = reparacionTabique ?? reparacion_tabique;
+    const itemizadoMandanteInput = itemizadoMandante ?? itemizado_mandante;
+
+    if (codigoBeckInput !== undefined) {
+      data.codigo_beck = normalizeText(codigoBeckInput) || null;
+    }
+    if (itemizadoBeckInput !== undefined) {
+      const value = normalizeText(itemizadoBeckInput);
+      data.itemizado_beck = value || null;
+      data.descripcion_material = value || currentRegistro.descripcion_material;
+    }
+    if (recinto !== undefined) data.recinto = normalizeText(recinto) || null;
+    if (modulo !== undefined) data.modulo = normalizeText(modulo) || currentRegistro.modulo;
+    if (piso !== undefined) data.piso = normalizeText(piso) || currentRegistro.piso;
+    if (ejeNumericoInput !== undefined) {
+      data.eje_numerico = normalizeText(ejeNumericoInput) || currentRegistro.eje_numerico;
+    }
+    if (ejeAlfabeticoInput !== undefined) {
+      data.eje_alfabetico =
+        normalizeText(ejeAlfabeticoInput).toUpperCase() ||
+        currentRegistro.eje_alfabetico;
+    }
+    if (numeroSelloInput !== undefined) {
+      data.numero_sello = normalizeText(numeroSelloInput) || currentRegistro.numero_sello;
+    }
+    if (cantidadSellosInput !== undefined) {
+      const parsed = Number(cantidadSellosInput);
+      if (!Number.isFinite(parsed)) {
+        return res.status(400).json({
+          success: false,
+          error: "Cantidad de sellos no válida",
+        });
+      }
+      data.cantidad_sellos = Math.trunc(parsed);
+    }
+    if (nombreSelladorInput !== undefined) {
+      data.nombre_sellador =
+        normalizeText(nombreSelladorInput) || currentRegistro.nombre_sellador;
+    }
+
+    const holguraParsed = parseOptionalDecimal(holgura);
+    if (holgura !== undefined) {
+      if (holguraParsed === undefined) {
+        return res.status(400).json({
+          success: false,
+          error: "Holgura no válida",
+        });
+      }
+      data.holgura = holguraParsed ?? currentRegistro.holgura;
+    }
+
+    const accesibilidadParsed = parseOptionalInt(accesibilidad);
+    if (accesibilidad !== undefined) {
+      if (accesibilidadParsed === undefined) {
+        return res.status(400).json({
+          success: false,
+          error: "Accesibilidad no válida",
+        });
+      }
+      data.accesibilidad = accesibilidadParsed;
+    }
+
+    const aislacionParsed = parseOptionalDecimal(aislacion);
+    if (aislacion !== undefined) {
+      if (aislacionParsed === undefined) {
+        return res.status(400).json({
+          success: false,
+          error: "Aislación no válida",
+        });
+      }
+      data.aislacion = aislacionParsed;
+    }
+
+    const reparacionParsed = parseOptionalDecimal(reparacionTabiqueInput);
+    if (reparacionTabiqueInput !== undefined) {
+      if (reparacionParsed === undefined) {
+        return res.status(400).json({
+          success: false,
+          error: "Reparación de tabique no válida",
+        });
+      }
+      data.reparacion_tabique = reparacionParsed;
+    }
+
+    if (folio !== undefined) data.folio = normalizeText(folio) || null;
+    if (observaciones !== undefined) {
+      data.observaciones = normalizeText(observaciones) || null;
+    }
+    if (itemizadoMandanteInput !== undefined) {
+      data.itemizado_mandante = normalizeText(itemizadoMandanteInput) || null;
+    }
+
+    data.updated_at = new Date();
+
+    await prisma.registros_terreno.update({
+      where: { id: registroId },
+      data,
+    });
+
+    const registro = await findRegistroWithDetails(registroId);
+
+    return res.json({
+      success: true,
+      data: mapRegistroIngenieria(registro),
+      message: "Registro actualizado",
+    });
+  } catch (error) {
+    console.error("UPDATE REGISTRO INGENIERIA ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No se pudo actualizar el registro",
+    });
+  }
+}
+
+export async function validarRegistroIngenieria(req: Request, res: Response) {
+  try {
+    if (!ensureIngenieria(req, res)) return;
+
+    const registroId = getParamValue(req.params.id);
+    const notas = normalizeText(req.body?.notas);
+
+    if (!registroId) {
+      return res.status(400).json({
+        success: false,
+        error: "Falta id del registro",
+      });
+    }
+
+    const currentRegistro = await prisma.registros_terreno.findUnique({
+      where: { id: registroId },
+    });
+
+    if (!currentRegistro) {
+      return res.status(404).json({
+        success: false,
+        error: "Registro no encontrado",
+      });
+    }
+
+    if (currentRegistro.estado !== EstadoRegistroTerreno.en_revision) {
+      return res.status(400).json({
+        success: false,
+        error: "Solo se puede validar un registro en revisión",
+      });
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.registros_terreno.update({
+        where: { id: registroId },
+        data: {
+          estado: EstadoRegistroTerreno.validado,
+          motivo_rechazo: null,
+          fecha_rechazo: null,
+          rechazado_por_id: null,
+          devuelto_a_tecnico: false,
+          updated_at: new Date(),
+        },
+      });
+
+      await tx.procesamiento_ingenieria.upsert({
+        where: { registro_terreno_id: registroId },
+        create: {
+          registro_terreno_id: registroId,
+          usuario_id: req.user!.id,
+          codigo: currentRegistro.codigo_beck,
+          total_sellos_calculado: currentRegistro.cantidad_final,
+          notas: notas || null,
+        },
+        update: {
+          usuario_id: req.user!.id,
+          codigo: currentRegistro.codigo_beck,
+          total_sellos_calculado: currentRegistro.cantidad_final,
+          notas: notas || undefined,
+          procesado_at: new Date(),
+        },
+      });
+    });
+
+    const registro = await findRegistroWithDetails(registroId);
+
+    return res.json({
+      success: true,
+      data: mapRegistroIngenieria(registro),
+      message: "Registro validado",
+    });
+  } catch (error) {
+    console.error("VALIDAR REGISTRO INGENIERIA ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No se pudo validar el registro",
+    });
+  }
+}
+
+export async function rechazarRegistroIngenieria(req: Request, res: Response) {
+  try {
+    if (!ensureIngenieria(req, res)) return;
+
+    const registroId = getParamValue(req.params.id);
+    const motivoRechazo =
+      normalizeText(req.body?.motivoRechazo) ||
+      normalizeText(req.body?.motivo_rechazo);
+
+    if (!registroId) {
+      return res.status(400).json({
+        success: false,
+        error: "Falta id del registro",
+      });
+    }
+
+    if (!motivoRechazo) {
+      return res.status(400).json({
+        success: false,
+        error: "Debes ingresar el motivo del rechazo",
+      });
+    }
+
+    const currentRegistro = await prisma.registros_terreno.findUnique({
+      where: { id: registroId },
+    });
+
+    if (!currentRegistro) {
+      return res.status(404).json({
+        success: false,
+        error: "Registro no encontrado",
+      });
+    }
+
+    if (currentRegistro.estado !== EstadoRegistroTerreno.en_revision) {
+      return res.status(400).json({
+        success: false,
+        error: "Solo se puede rechazar un registro en revisión",
+      });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const rechazado = await tx.registros_terreno.update({
+        where: { id: registroId },
+        data: {
+          estado: EstadoRegistroTerreno.rechazado,
+          motivo_rechazo: motivoRechazo,
+          fecha_rechazo: new Date(),
+          rechazado_por_id: req.user!.id,
+          devuelto_a_tecnico: false,
+          updated_at: new Date(),
+        },
+      });
+
+      const copia = await tx.registros_terreno.create({
+        data: {
+          obra_id: currentRegistro.obra_id,
+          usuario_id: currentRegistro.usuario_id,
+          fecha: currentRegistro.fecha,
+          dia_semana: currentRegistro.dia_semana,
+          descripcion_material: currentRegistro.descripcion_material,
+          modulo: currentRegistro.modulo,
+          piso: currentRegistro.piso,
+          eje_numerico: currentRegistro.eje_numerico,
+          eje_alfabetico: currentRegistro.eje_alfabetico,
+          numero_sello: currentRegistro.numero_sello,
+          cantidad_sellos: currentRegistro.cantidad_sellos,
+          nombre_sellador: currentRegistro.nombre_sellador,
+          holgura: currentRegistro.holgura,
+          observaciones: currentRegistro.observaciones,
+          fotos_urls: currentRegistro.fotos_urls,
+          estado: EstadoRegistroTerreno.pendiente,
+          metros_lineales: currentRegistro.metros_lineales,
+          tipo_registro: currentRegistro.tipo_registro,
+          devuelto_a_tecnico: true,
+          codigo_beck: currentRegistro.codigo_beck,
+          itemizado_mandante_id: currentRegistro.itemizado_mandante_id,
+          itemizado_beck: currentRegistro.itemizado_beck,
+          itemizado_mandante: currentRegistro.itemizado_mandante,
+          foto_url: currentRegistro.foto_url,
+          recinto: currentRegistro.recinto,
+          factor_por_holguras: currentRegistro.factor_por_holguras,
+          accesibilidad: currentRegistro.accesibilidad,
+          cantidad_sellos_con_factores:
+            currentRegistro.cantidad_sellos_con_factores,
+          aislacion: currentRegistro.aislacion,
+          cantidad_sellos_aislacion:
+            currentRegistro.cantidad_sellos_aislacion,
+          reparacion_tabique: currentRegistro.reparacion_tabique,
+          cantidad_final: currentRegistro.cantidad_final,
+          folio: currentRegistro.folio,
+          es_correccion: true,
+          registro_origen_id: registroId,
+        },
+      });
+
+      const fotos = await tx.fotos_registro.findMany({
+        where: { registro_id: registroId },
+      });
+
+      if (fotos.length) {
+        await tx.fotos_registro.createMany({
+          data: fotos.map((foto) => ({
+            registro_id: copia.id,
+            url: foto.url,
+            public_id: foto.public_id,
+            nombre_archivo: foto.nombre_archivo,
+            formato: foto.formato,
+            bytes: foto.bytes,
+            subido_por_id: foto.subido_por_id,
+          })),
+        });
+      }
+
+      await tx.procesamiento_ingenieria.upsert({
+        where: { registro_terreno_id: registroId },
+        create: {
+          registro_terreno_id: registroId,
+          usuario_id: req.user!.id,
+          notas: motivoRechazo,
+        },
+        update: {
+          usuario_id: req.user!.id,
+          notas: motivoRechazo,
+          procesado_at: new Date(),
+        },
+      });
+
+      return { rechazado, copia };
+    });
+
+    const registro = await findRegistroWithDetails(result.rechazado.id);
+
+    return res.json({
+      success: true,
+      data: {
+        registro: mapRegistroIngenieria(registro),
+        correccionId: result.copia.id,
+      },
+      message: "Registro rechazado y copia creada para corrección",
+    });
+  } catch (error) {
+    console.error("RECHAZAR REGISTRO INGENIERIA ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No se pudo rechazar el registro",
+    });
+  }
+}
