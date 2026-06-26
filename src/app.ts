@@ -3,6 +3,7 @@ import express from "express";
 import { env } from "./config/env";
 import authRoutes from "./routes/auth.routes";
 import clienteRoutes from "./routes/cliente.routes";
+import ingenieriaRoutes from "./routes/ingenieria.routes";
 import itemizadoOpcionesRoutes from "./routes/itemizadoOpciones.routes";
 import obrasRoutes from "./routes/obras.routes";
 import registrosRoutes from "./routes/registros.routes";
@@ -32,6 +33,7 @@ app.get("/", (_req, res) => {
 
 app.use("/api/mobile/auth", authRoutes);
 app.use("/api/cliente", clienteRoutes);
+app.use("/api/ingenieria", ingenieriaRoutes);
 app.use("/api/itemizado-opciones", itemizadoOpcionesRoutes);
 app.use("/api/obras", obrasRoutes);
 app.use("/api/registros", registrosRoutes);

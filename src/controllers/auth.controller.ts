@@ -8,6 +8,7 @@ const ALLOWED_LOGIN_ROLES = new Set([
   "administrador",
   "terreno",
   "jefeobra",
+  "ingenieria",
   "cliente",
 ]);
 const ALLOWED_EMAIL_DOMAIN = "@becksoluciones.cl";
