@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { EstadoObra } from "@prisma/client";
+import { EstadoObra, EstadoRegistroTerreno } from "@prisma/client";
 import { prisma } from "../config/prisma";
 import {
   deleteImageFromCloudinary,
@@ -378,11 +378,20 @@ export async function getMisRegistros(req: Request, res: Response) {
       });
     }
 
+    const ESTADOS_VALIDOS = Object.values(EstadoRegistroTerreno);
+
+    if (estado && !ESTADOS_VALIDOS.includes(estado as EstadoRegistroTerreno)) {
+      return res.status(400).json({
+        success: false,
+        error: `Estado no válido. Valores aceptados: ${ESTADOS_VALIDOS.join(", ")}`,
+      });
+    }
+
     const where =
       userRole === "jefeobra"
         ? {
             ...(obraId ? { obra_id: obraId } : {}),
-            ...(estado ? { estado: estado as any } : {}),
+            ...(estado ? { estado: estado as EstadoRegistroTerreno } : {}),
             obras: {
               estado: {
                 in: [EstadoObra.activa, EstadoObra.pausada],
@@ -394,7 +403,7 @@ export async function getMisRegistros(req: Request, res: Response) {
           }
         : {
             usuario_id: userId,
-            ...(estado ? { estado: estado as any } : {}),
+            ...(estado ? { estado: estado as EstadoRegistroTerreno } : {}),
             ...(scope === "registro"
               ? {
                   OR: [
@@ -910,13 +919,13 @@ export async function deleteRegistroPendiente(req: Request, res: Response) {
       });
     }
 
-    await prisma.registros_terreno.delete({
-      where: { id: registro.id },
-    });
-
     await Promise.allSettled(
       registro.fotos.map((foto) => deleteImageFromCloudinary(foto.public_id))
     );
+
+    await prisma.registros_terreno.delete({
+      where: { id: registro.id },
+    });
 
     return res.json({
       success: true,
@@ -974,6 +983,13 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
       return res.status(404).json({
         success: false,
         error: "Registro no encontrado",
+      });
+    }
+
+    if (currentRegistro.estado !== "pendiente") {
+      return res.status(400).json({
+        success: false,
+        error: "Solo se pueden enviar a ingeniería registros en estado pendiente",
       });
     }
 
@@ -1278,13 +1294,6 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
       });
     }
 
-    if (replaceExisting && userRole !== "jefeobra" && !isAdmin(userRole)) {
-      return res.status(403).json({
-        success: false,
-        error: "Solo jefe de obra puede reemplazar fotografias",
-      });
-    }
-
     const registro = await prisma.registros_terreno.findUnique({
       where: { id: registroId },
     });
@@ -1302,6 +1311,18 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
       return res.status(403).json({
         success: false,
         error: "No tienes permisos para subir fotos a este registro",
+      });
+    }
+
+    if (
+      replaceExisting &&
+      !isAdmin(userRole) &&
+      userRole !== "jefeobra" &&
+      registro.usuario_id !== userId
+    ) {
+      return res.status(403).json({
+        success: false,
+        error: "Solo jefe de obra puede reemplazar fotografias de registros de otros usuarios",
       });
     }
 

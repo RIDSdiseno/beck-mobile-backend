@@ -722,24 +722,6 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
         },
       });
 
-      const fotos = await tx.fotos_registro.findMany({
-        where: { registro_id: registroId },
-      });
-
-      if (fotos.length) {
-        await tx.fotos_registro.createMany({
-          data: fotos.map((foto) => ({
-            registro_id: copia.id,
-            url: foto.url,
-            public_id: foto.public_id,
-            nombre_archivo: foto.nombre_archivo,
-            formato: foto.formato,
-            bytes: foto.bytes,
-            subido_por_id: foto.subido_por_id,
-          })),
-        });
-      }
-
       await tx.procesamiento_ingenieria.upsert({
         where: { registro_terreno_id: registroId },
         create: {
