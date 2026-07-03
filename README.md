@@ -57,6 +57,11 @@ DATABASE_URL=postgresql://usuario:password@host:5432/beck_db
 ```
 
 > **Nota de seguridad:** El servidor falla al iniciar (`throw new Error`) si falta alguna variable requerida o si `JWT_SECRET` tiene menos de 32 caracteres. Esto es intencional para evitar deployar con configuración incompleta.
+>
+> Para generar un `JWT_SECRET` seguro:
+> ```bash
+> openssl rand -base64 64
+> ```
 
 ---
 
@@ -83,16 +88,21 @@ El servidor escucha en `http://localhost:3001` por defecto.
 ## Build y producción
 
 ```bash
-# Compilar TypeScript → dist/
+# 1. Instalar todas las dependencias (incluye devDependencies necesarias para el build)
+npm ci
+
+# 2. Compilar: genera el cliente Prisma y transpila TypeScript → dist/
 npm run build
 
-# Iniciar el servidor compilado
+# 3. Iniciar el servidor compilado
 npm start
 ```
 
-> **Deploy:** en el servidor de producción instalar solo dependencias de producción para no exponer vulnerabilidades de devDependencies:
+> **Nota sobre devDependencies en producción:** `npm run build` ejecuta `prisma generate && tsc`, que requiere `prisma` y `typescript` de `devDependencies`. Por eso **no** se debe usar `npm ci --omit=dev` antes del build.
+>
+> Opcionalmente, después del build se puede limpiar las dependencias de desarrollo:
 > ```bash
-> npm ci --omit=dev
+> npm prune --omit=dev
 > ```
 
 ---
