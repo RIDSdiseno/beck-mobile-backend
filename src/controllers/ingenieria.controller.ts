@@ -90,7 +90,7 @@ function mapRegistroIngenieria(registro: any) {
   };
 }
 
-async function findRegistroWithDetails(id: string) {
+export async function findRegistroWithDetails(id: string) {
   return prisma.registros_terreno.findUnique({
     where: { id },
     include: {
