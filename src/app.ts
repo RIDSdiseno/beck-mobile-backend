@@ -1,5 +1,6 @@
 import cors from "cors";
 import express from "express";
+import helmet from "helmet";
 import { env } from "./config/env";
 import authRoutes from "./routes/auth.routes";
 import clienteRoutes from "./routes/cliente.routes";
@@ -10,6 +11,8 @@ import registrosRoutes from "./routes/registros.routes";
 
 
 const app = express();
+
+app.use(helmet());
 
 if (env.corsOrigin !== "none") {
   app.use(
