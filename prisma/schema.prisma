@@ -368,6 +368,7 @@ model registros_terreno {
   fecha_seleccion_inspeccion                                          DateTime?                 @db.Timestamp(6)
   seleccionado_inspeccion_por_id                                      String?                   @db.Uuid
   seleccionado_para_inspeccion                                        Boolean                   @default(false)
+  inspeccion_estado                                                   String?                   @db.VarChar(50)
   validado_cliente                                                    Boolean                   @default(false)
   validado_cliente_at                                                 DateTime?                 @db.Timestamp(6)
   validado_cliente_por_id                                             String?                   @db.Uuid

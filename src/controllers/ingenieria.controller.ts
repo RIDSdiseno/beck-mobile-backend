@@ -930,25 +930,31 @@ export async function createControlInspeccion(req: Request, res: Response) {
       }
     }
 
-    const control = await prisma.controles_inspeccion.create({
-      data: {
-        registro_terreno_id: registroId,
-        ingeniero_id: req.user!.id,
-        fecha: new Date(fecha),
-        ensayo: normalizeText(ensayo),
-        observacion: observacion ? normalizeText(observacion) : null,
-        conformidad: conformidad
-          ? (conformidad as EstadoConformidadInspeccion)
-          : null,
-        controles_inspeccion_parametros: {
-          create: parsedParametros,
+    const [control] = await prisma.$transaction([
+      prisma.controles_inspeccion.create({
+        data: {
+          registro_terreno_id: registroId,
+          ingeniero_id: req.user!.id,
+          fecha: new Date(fecha),
+          ensayo: normalizeText(ensayo),
+          observacion: observacion ? normalizeText(observacion) : null,
+          conformidad: conformidad
+            ? (conformidad as EstadoConformidadInspeccion)
+            : null,
+          controles_inspeccion_parametros: {
+            create: parsedParametros,
+          },
         },
-      },
-      include: {
-        controles_inspeccion_parametros: { orderBy: { orden: "asc" } },
-        usuarios: { select: { id: true, nombre: true, email: true } },
-      },
-    });
+        include: {
+          controles_inspeccion_parametros: { orderBy: { orden: "asc" } },
+          usuarios: { select: { id: true, nombre: true, email: true } },
+        },
+      }),
+      prisma.registros_terreno.update({
+        where: { id: registroId },
+        data: { inspeccion_estado: "inspeccionado" },
+      }),
+    ]);
 
     return res.status(201).json({ success: true, data: control });
   } catch (error) {
