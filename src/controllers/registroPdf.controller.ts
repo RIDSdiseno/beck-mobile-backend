@@ -301,7 +301,8 @@ export async function generateRegistroPdfBuffer(
 
 /**
  * GET /api/ingenieria/registros/:id/pdf
- * Genera el PDF técnico del registro en tiempo real.
+ * Si el cliente ya firmó el registro, redirige al PDF firmado en Cloudinary.
+ * Si no, genera el PDF técnico en tiempo real.
  */
 export async function descargarRegistroPdf(req: Request, res: Response): Promise<void> {
   try {
@@ -320,6 +321,11 @@ export async function descargarRegistroPdf(req: Request, res: Response): Promise
     }
 
     const codigoRegistro = registro.codigo_beck ?? `REG-${registro.id.slice(0, 6).toUpperCase()}`;
+
+    if (registro.pdf_firmado_url) {
+      res.redirect(registro.pdf_firmado_url);
+      return;
+    }
 
     const pdfBuffer = await generateRegistroPdfBuffer(registro);
 

@@ -380,6 +380,8 @@ model registros_terreno {
   validado_cliente                                                    Boolean                   @default(false)
   validado_cliente_at                                                 DateTime?                 @db.Timestamp(6)
   validado_cliente_por_id                                             String?                   @db.Uuid
+  firma_cliente_url                                                   String?
+  pdf_firmado_url                                                     String?
   controles_inspeccion                                                controles_inspeccion[]
   fotos                                                               fotos_registro[]
   procesamiento_ingenieria                                            procesamiento_ingenieria?
