@@ -117,8 +117,6 @@ function normalizeRegistroCliente(registro: any) {
     // Campos cliente
     validadoCliente:           registro.validado_cliente ?? false,
     validadoClienteAt:         registro.validado_cliente_at  ?? null,
-    firmaClienteUrl:           registro.firma_cliente_url    ?? null,
-    pdfFirmadoUrl:             registro.pdf_firmado_url      ?? null,
     // Info de obra (disponible en historial)
     obraNombre:                registro.obras?.nombre  ?? null,
     obraCodigo:                registro.obras?.codigo  ?? null,
@@ -218,8 +216,6 @@ const REGISTRO_SELECT = {
   obra_id:                      true,
   validado_cliente:             true,
   validado_cliente_at:          true,
-  firma_cliente_url:            true,
-  pdf_firmado_url:              true,
   fotos: {
     select: { id: true, url: true, nombre_archivo: true, created_at: true },
     orderBy: { created_at: "desc" as const },
@@ -376,7 +372,6 @@ export async function validarRegistroCliente(req: Request, res: Response) {
         validado_cliente:       true,
         validado_cliente_at:    firmadoAt,
         validado_cliente_por_id: session.userId,
-        pdf_firmado_url:        pdfResult.secure_url,
       },
       select: {
         ...REGISTRO_SELECT,
