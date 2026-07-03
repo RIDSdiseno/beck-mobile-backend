@@ -1,5 +1,10 @@
 import { Request, Response } from "express";
-import { EstadoRegistroTerreno, Prisma } from "@prisma/client";
+import {
+  EstadoConformidadInspeccion,
+  EstadoRegistroTerreno,
+  Prisma,
+  ResultadoParametroInspeccion,
+} from "@prisma/client";
 import { prisma } from "../config/prisma";
 
 const ESTADOS_INGENIERIA = [
@@ -193,6 +198,7 @@ export async function getIngenieriaRegistros(req: Request, res: Response) {
 
     const estado = normalizeText(req.query.estado);
     const search = normalizeText(req.query.search).toLowerCase();
+    const obraId = normalizeText(req.query.obraId);
     const limitValue = Number(req.query.limit);
     const take =
       Number.isFinite(limitValue) && limitValue > 0
@@ -209,6 +215,7 @@ export async function getIngenieriaRegistros(req: Request, res: Response) {
     const registros = await prisma.registros_terreno.findMany({
       where: {
         ...(estado ? { estado: estado as EstadoRegistroTerreno } : {}),
+        ...(obraId ? { obra_id: obraId } : {}),
         ...(search
           ? {
               OR: [
@@ -756,5 +763,196 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
       success: false,
       error: "No se pudo rechazar el registro",
     });
+  }
+}
+
+export async function getIngenieriaRegistroById(req: Request, res: Response) {
+  try {
+    if (!ensureIngenieria(req, res)) return;
+
+    const registroId = getParamValue(req.params.id);
+
+    if (!registroId) {
+      return res.status(400).json({ success: false, error: "Falta id del registro" });
+    }
+
+    const registro = await findRegistroWithDetails(registroId);
+
+    if (!registro) {
+      return res.status(404).json({ success: false, error: "Registro no encontrado" });
+    }
+
+    return res.json({ success: true, data: mapRegistroIngenieria(registro) });
+  } catch (error) {
+    console.error("GET INGENIERIA REGISTRO BY ID ERROR:", error);
+    return res.status(500).json({ success: false, error: "No se pudo obtener el registro" });
+  }
+}
+
+export async function marcarInspeccionIngenieria(req: Request, res: Response) {
+  try {
+    if (!ensureIngenieria(req, res)) return;
+
+    const registroId = getParamValue(req.params.id);
+    const seleccionado = req.body?.seleccionadoParaInspeccion;
+
+    if (!registroId) {
+      return res.status(400).json({ success: false, error: "Falta id del registro" });
+    }
+
+    if (typeof seleccionado !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        error: "seleccionadoParaInspeccion debe ser true o false",
+      });
+    }
+
+    const existing = await prisma.registros_terreno.findUnique({ where: { id: registroId } });
+
+    if (!existing) {
+      return res.status(404).json({ success: false, error: "Registro no encontrado" });
+    }
+
+    await prisma.registros_terreno.update({
+      where: { id: registroId },
+      data: {
+        seleccionado_para_inspeccion: seleccionado,
+        seleccionado_inspeccion_por_id: seleccionado ? req.user!.id : null,
+        fecha_seleccion_inspeccion: seleccionado ? new Date() : null,
+        updated_at: new Date(),
+      },
+    });
+
+    const registro = await findRegistroWithDetails(registroId);
+
+    return res.json({ success: true, data: mapRegistroIngenieria(registro) });
+  } catch (error) {
+    console.error("MARCAR INSPECCION ERROR:", error);
+    return res.status(500).json({ success: false, error: "No se pudo actualizar la inspección" });
+  }
+}
+
+export async function getControlInspeccion(req: Request, res: Response) {
+  try {
+    if (!ensureIngenieria(req, res)) return;
+
+    const registroId = getParamValue(req.params.id);
+
+    if (!registroId) {
+      return res.status(400).json({ success: false, error: "Falta id del registro" });
+    }
+
+    const control = await prisma.controles_inspeccion.findFirst({
+      where: { registro_terreno_id: registroId },
+      include: {
+        controles_inspeccion_parametros: {
+          orderBy: { orden: "asc" },
+        },
+        usuarios: {
+          select: { id: true, nombre: true, email: true },
+        },
+      },
+      orderBy: { created_at: "desc" },
+    });
+
+    if (!control) {
+      return res.status(404).json({ success: false, error: "Control de inspección no encontrado" });
+    }
+
+    return res.json({ success: true, data: control });
+  } catch (error) {
+    console.error("GET CONTROL INSPECCION ERROR:", error);
+    return res.status(500).json({ success: false, error: "No se pudo obtener el control de inspección" });
+  }
+}
+
+const PARAMETROS_RESULTADO_VALUES = new Set<string>(["cumple", "no_cumple", "no_aplica"]);
+const CONFORMIDAD_VALUES = new Set<string>(["conforme", "no_conforme"]);
+
+export async function createControlInspeccion(req: Request, res: Response) {
+  try {
+    if (!ensureIngenieria(req, res)) return;
+
+    const registroId = getParamValue(req.params.id);
+
+    if (!registroId) {
+      return res.status(400).json({ success: false, error: "Falta id del registro" });
+    }
+
+    const existing = await prisma.registros_terreno.findUnique({ where: { id: registroId } });
+
+    if (!existing) {
+      return res.status(404).json({ success: false, error: "Registro no encontrado" });
+    }
+
+    const { fecha, ensayo, observacion, conformidad, parametros } = req.body ?? {};
+
+    if (!fecha) {
+      return res.status(400).json({ success: false, error: "La fecha es requerida" });
+    }
+
+    if (!ensayo || !normalizeText(ensayo)) {
+      return res.status(400).json({ success: false, error: "El ensayo es requerido" });
+    }
+
+    if (conformidad && !CONFORMIDAD_VALUES.has(conformidad)) {
+      return res.status(400).json({ success: false, error: "Conformidad no válida" });
+    }
+
+    const parsedParametros: {
+      orden: number;
+      parametro: string;
+      resultado: ResultadoParametroInspeccion;
+      observacion?: string;
+    }[] = [];
+
+    if (Array.isArray(parametros)) {
+      for (let i = 0; i < parametros.length; i++) {
+        const p = parametros[i];
+        if (!p.parametro || !p.resultado) {
+          return res.status(400).json({
+            success: false,
+            error: `Parámetro ${i + 1}: parametro y resultado son requeridos`,
+          });
+        }
+        if (!PARAMETROS_RESULTADO_VALUES.has(p.resultado)) {
+          return res.status(400).json({
+            success: false,
+            error: `Parámetro ${i + 1}: resultado no válido`,
+          });
+        }
+        parsedParametros.push({
+          orden: p.orden ?? i + 1,
+          parametro: normalizeText(p.parametro),
+          resultado: p.resultado as ResultadoParametroInspeccion,
+          observacion: p.observacion ? normalizeText(p.observacion) : undefined,
+        });
+      }
+    }
+
+    const control = await prisma.controles_inspeccion.create({
+      data: {
+        registro_terreno_id: registroId,
+        ingeniero_id: req.user!.id,
+        fecha: new Date(fecha),
+        ensayo: normalizeText(ensayo),
+        observacion: observacion ? normalizeText(observacion) : null,
+        conformidad: conformidad
+          ? (conformidad as EstadoConformidadInspeccion)
+          : null,
+        controles_inspeccion_parametros: {
+          create: parsedParametros,
+        },
+      },
+      include: {
+        controles_inspeccion_parametros: { orderBy: { orden: "asc" } },
+        usuarios: { select: { id: true, nombre: true, email: true } },
+      },
+    });
+
+    return res.status(201).json({ success: true, data: control });
+  } catch (error) {
+    console.error("CREATE CONTROL INSPECCION ERROR:", error);
+    return res.status(500).json({ success: false, error: "No se pudo crear el control de inspección" });
   }
 }
