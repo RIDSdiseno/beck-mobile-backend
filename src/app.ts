@@ -19,7 +19,7 @@ if (env.corsOrigin !== "none") {
     cors({
       origin:
         env.corsOrigin === "*"
-          ? true
+          ? "*"
           : env.corsOrigin.split(",").map((origin) => origin.trim()),
     })
   );

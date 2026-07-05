@@ -302,15 +302,23 @@ export async function validarRegistroCliente(req: Request, res: Response) {
       return res.status(400).json({ success: false, error: "Falta id del registro" });
     }
 
-    const { pathData, canvasWidth, canvasHeight } = req.body as {
-      pathData:     string;
-      canvasWidth:  number;
-      canvasHeight: number;
-    };
+    const { pathData, canvasWidth, canvasHeight } = req.body ?? {};
 
-    if (!pathData || !canvasWidth || !canvasHeight) {
+    if (!pathData || typeof pathData !== "string" || pathData.trim().length === 0) {
       return res.status(400).json({ success: false, error: "Falta la firma del cliente" });
     }
+    if (pathData.length > 100_000) {
+      return res.status(400).json({ success: false, error: "La firma es demasiado compleja" });
+    }
+    if (
+      !Number.isFinite(Number(canvasWidth))  || Number(canvasWidth)  <= 0 || Number(canvasWidth)  > 5000 ||
+      !Number.isFinite(Number(canvasHeight)) || Number(canvasHeight) <= 0 || Number(canvasHeight) > 5000
+    ) {
+      return res.status(400).json({ success: false, error: "Dimensiones de canvas inválidas" });
+    }
+
+    const safeCanvasWidth  = Number(canvasWidth);
+    const safeCanvasHeight = Number(canvasHeight);
 
     // Verificar acceso a la obra
     const obraIds = await getObraIdsCliente(session.userId, session.userRole);
@@ -355,8 +363,8 @@ export async function validarRegistroCliente(req: Request, res: Response) {
     // Generar PDF con firma incrustada
     const pdfBuffer = await generateRegistroPdfBuffer(registroFull, {
       pathData,
-      canvasWidth,
-      canvasHeight,
+      canvasWidth:  safeCanvasWidth,
+      canvasHeight: safeCanvasHeight,
       firmadoPor,
       firmadoAt,
     });
