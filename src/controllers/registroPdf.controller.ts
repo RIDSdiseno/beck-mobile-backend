@@ -1,4 +1,6 @@
 import { Request, Response } from "express";
+import fs from "fs";
+import path from "path";
 import PDFDocument from "pdfkit";
 import { findRegistroWithDetails } from "./ingenieria.controller";
 
@@ -219,6 +221,17 @@ export async function generateRegistroPdfBuffer(
   const imageBuffers = await Promise.all(fotoUrls.map(fetchImageBuffer));
   const validImages  = imageBuffers.filter((b): b is Buffer => b !== null);
 
+  // Cargar sello si la imagen existe en assets/
+  let selloBuffer: Buffer | null = null;
+  if (signatureOptions?.pathData) {
+    try {
+      const selloPath = path.join(process.cwd(), "assets", "sello-beck.png");
+      selloBuffer = fs.readFileSync(selloPath);
+    } catch {
+      // Sello no disponible — se genera el PDF sin él
+    }
+  }
+
   return new Promise<Buffer>((resolve, reject) => {
     const doc    = new PDFDocument({ size: "A4", margin: PDF_MARGIN });
     const chunks: Buffer[] = [];
@@ -230,50 +243,55 @@ export async function generateRegistroPdfBuffer(
 
     // ── Sección de firma cliente (si aplica) ─────────────────────────────────────
     if (signatureOptions?.pathData) {
-      pdfHRule(doc);
-      pdfSectionHeader(doc, "VALIDACIÓN CLIENTE");
+      // Nueva página dedicada para la firma — evita que doc.y desbordado rompa el layout
+      doc.addPage();
+      doc.rect(0, 0, PDF_W, 5).fill(BECK_YELLOW);
+      doc.y = 18;
 
-      // Badge validado cliente
+      pdfSectionHeader(doc, "VALIDACIÓN DEL CLIENTE");
+
+      // Badge azul "VALIDADO POR CLIENTE"
       const clienteBadgeY = doc.y;
-      doc.rect(PDF_MARGIN, clienteBadgeY, 130, 15).fill("#2563eb");
+      doc.rect(PDF_MARGIN, clienteBadgeY, 138, 16).fill("#2563eb");
       doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#ffffff")
-        .text("VALIDADO POR CLIENTE", PDF_MARGIN + 5, clienteBadgeY + 4, { width: 120, lineBreak: false });
-      doc.y = clienteBadgeY + 22;
+        .text("VALIDADO POR CLIENTE", PDF_MARGIN + 6, clienteBadgeY + 5, { width: 126, lineBreak: false });
+      doc.y = clienteBadgeY + 24;
 
       pdfFieldRow(doc, "Firmado por:", signatureOptions.firmadoPor || "-");
       if (signatureOptions.firmadoAt) {
         pdfFieldRow(doc, "Fecha de firma:", formatDateTime(signatureOptions.firmadoAt));
       }
 
-      doc.y += 8;
+      doc.y += 18;
 
-      // Caja de la firma
-      const sigBoxX = PDF_MARGIN;
-      const sigBoxY = doc.y;
-      const sigBoxW = PDF_CONTENT_W;
-      const sigBoxH = 130;
+      // Layout: caja de firma (izquierda) + sello (derecha, si existe)
+      const sigBoxY   = doc.y;
+      const sigBoxH   = 180;
+      const stampColW = selloBuffer ? 160 : 0;
+      const colGap    = selloBuffer ? 12  : 0;
+      const sigBoxW   = PDF_CONTENT_W - stampColW - colGap;
+      const sigBoxX   = PDF_MARGIN;
 
+      // ── Caja de firma ─────────────────────────────────────────────────────────
+      doc.rect(sigBoxX, sigBoxY, sigBoxW, sigBoxH).fill("#f8fafc");
       doc.rect(sigBoxX, sigBoxY, sigBoxW, sigBoxH)
-        .strokeColor("#cbd5e1")
-        .lineWidth(1)
-        .stroke();
+        .strokeColor("#cbd5e1").lineWidth(1).stroke();
 
-      // Etiqueta de fondo
-      doc.font("Helvetica").fontSize(8).fillColor("#cbd5e1")
-        .text("Firma del cliente", sigBoxX + 8, sigBoxY + sigBoxH - 16, { lineBreak: false });
+      doc.font("Helvetica").fontSize(8).fillColor("#94a3b8")
+        .text("Firma digital del cliente", sigBoxX + 8, sigBoxY + sigBoxH - 17, { lineBreak: false });
 
-      // Dibujar la firma escalada al box con padding
-      const padding  = 14;
-      const availW   = sigBoxW - padding * 2;
-      const availH   = sigBoxH - padding * 2;
-      const scaleX   = availW / (signatureOptions.canvasWidth  || 1);
-      const scaleY   = availH / (signatureOptions.canvasHeight || 1);
-      const scale    = Math.min(scaleX, scaleY, 1);
+      // Escalar y dibujar la firma dentro del box
+      const padding = 16;
+      const availW  = sigBoxW - padding * 2;
+      const availH  = sigBoxH - padding * 2 - 20;
+      const scaleX  = availW / (signatureOptions.canvasWidth  || 1);
+      const scaleY  = availH / (signatureOptions.canvasHeight || 1);
+      const scale   = Math.min(scaleX, scaleY);
 
-      const drawW    = (signatureOptions.canvasWidth  || 1) * scale;
-      const drawH    = (signatureOptions.canvasHeight || 1) * scale;
-      const offsetX  = sigBoxX + padding + (availW - drawW) / 2;
-      const offsetY  = sigBoxY + padding + (availH - drawH) / 2;
+      const drawW   = (signatureOptions.canvasWidth  || 1) * scale;
+      const drawH   = (signatureOptions.canvasHeight || 1) * scale;
+      const offsetX = sigBoxX + padding + (availW - drawW) / 2;
+      const offsetY = sigBoxY + padding + (availH - drawH) / 2;
 
       try {
         doc.save()
@@ -287,10 +305,23 @@ export async function generateRegistroPdfBuffer(
           .stroke()
           .restore();
       } catch {
-        // Si el path falla, dibujamos solo la caja
+        // Si el path falla la caja queda visible pero vacía
       }
 
-      doc.y = sigBoxY + sigBoxH + 10;
+      // ── Sello (columna derecha) ────────────────────────────────────────────────
+      if (selloBuffer) {
+        const stampSize = 150;
+        const stampColX = PDF_MARGIN + sigBoxW + colGap;
+        const stampImgX = stampColX + (stampColW - stampSize) / 2;
+        const stampImgY = sigBoxY + (sigBoxH - stampSize) / 2;
+        try {
+          doc.image(selloBuffer, stampImgX, stampImgY, { fit: [stampSize, stampSize] });
+        } catch {
+          // Imagen no procesable — continúa sin sello
+        }
+      }
+
+      doc.y = sigBoxY + sigBoxH + 12;
     }
 
     doc.end();
