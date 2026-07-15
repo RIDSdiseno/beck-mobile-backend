@@ -114,10 +114,21 @@ function buildPdfContent(doc: PDFKit.PDFDocument, registro: any, validImages: Bu
     .text(`Código: ${codigoRegistro}   ·   Fecha ejecución: ${formatDate(registro.fecha)}`);
   doc.y += 8;
 
+  const fueInspeccionadoConforme =
+    Array.isArray(registro.controles_inspeccion) && registro.controles_inspeccion.length > 0;
+
   const badgeY = doc.y;
   doc.rect(PDF_MARGIN, badgeY, 90, 15).fill("#16a34a");
   doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#ffffff")
     .text("VALIDADO", PDF_MARGIN + 5, badgeY + 4, { width: 80, lineBreak: false });
+
+  if (fueInspeccionadoConforme) {
+    const inspBadgeX = PDF_MARGIN + 90 + 8;
+    doc.rect(inspBadgeX, badgeY, 100, 15).fill("#2563eb");
+    doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#ffffff")
+      .text("INSPECCIONADO", inspBadgeX + 5, badgeY + 4, { width: 90, lineBreak: false });
+  }
+
   doc.y = badgeY + 22;
 
   pdfHRule(doc);

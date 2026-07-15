@@ -138,6 +138,11 @@ export async function findRegistroWithDetails(id: string) {
           rol: true,
         },
       },
+      controles_inspeccion: {
+        where: { conformidad: "conforme" },
+        select: { id: true },
+        take: 1,
+      },
     },
   });
 }
