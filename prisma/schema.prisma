@@ -373,10 +373,6 @@ model registros_terreno {
   inspeccion_revision_at                                              DateTime?                 @db.Timestamp(6)
   inspeccion_revision_por_id                                          String?                   @db.Uuid
   motivo_rechazo_inspeccion                                           String?
-  estado_validacion_obra                                              EstadoValidacionObra       @default(pendiente)
-  validacion_obra_at                                                  DateTime?                 @db.Timestamp(6)
-  validacion_obra_por_id                                              String?                   @db.Uuid
-  motivo_rechazo_obra                                                 String?
   validado_cliente                                                    Boolean                   @default(false)
   validado_cliente_at                                                 DateTime?                 @db.Timestamp(6)
   validado_cliente_por_id                                             String?                   @db.Uuid
@@ -394,7 +390,6 @@ model registros_terreno {
   usuarios                                                            usuarios                  @relation(fields: [usuario_id], references: [id])
   usuarios_registros_terreno_validado_cliente_por_idTousuarios        usuarios?                 @relation("registros_terreno_validado_cliente_por_idTousuarios", fields: [validado_cliente_por_id], references: [id])
   usuarios_registros_terreno_inspeccion_revision_por_idTousuarios     usuarios?                 @relation("registros_terreno_inspeccion_revision_por_idTousuarios", fields: [inspeccion_revision_por_id], references: [id])
-  usuarios_registros_terreno_validacion_obra_por_idTousuarios         usuarios?                 @relation("registros_terreno_validacion_obra_por_idTousuarios", fields: [validacion_obra_por_id], references: [id])
 
   @@index([estado])
   @@index([devuelto_a_tecnico])
@@ -411,8 +406,6 @@ model registros_terreno {
   @@index([inspeccion_estado])
   @@index([inspeccion_revision_estado])
   @@index([inspeccion_revision_por_id])
-  @@index([estado_validacion_obra])
-  @@index([validacion_obra_por_id])
   @@index([validado_cliente])
   @@index([validado_cliente_por_id])
 }
@@ -462,7 +455,6 @@ model usuarios {
   registros_terreno                                                            registros_terreno[]
   registros_terreno_registros_terreno_validado_cliente_por_idTousuarios        registros_terreno[]                   @relation("registros_terreno_validado_cliente_por_idTousuarios")
   registros_terreno_registros_terreno_inspeccion_revision_por_idTousuarios     registros_terreno[]                   @relation("registros_terreno_inspeccion_revision_por_idTousuarios")
-  registros_terreno_registros_terreno_validacion_obra_por_idTousuarios         registros_terreno[]                   @relation("registros_terreno_validacion_obra_por_idTousuarios")
   usuarios_obras                                                               usuarios_obras[]
 
   @@index([activo])
@@ -977,12 +969,6 @@ enum EstadoInspeccion {
 }
 
 enum EstadoRevisionInspeccion {
-  pendiente
-  validado
-  rechazado
-}
-
-enum EstadoValidacionObra {
   pendiente
   validado
   rechazado
