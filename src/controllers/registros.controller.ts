@@ -20,7 +20,7 @@ function getDiaSemana(fecha: Date) {
   return dias[fecha.getDay()];
 }
 
-function sanitizeCloudinaryFolderSegment(value: string | null | undefined) {
+export function sanitizeCloudinaryFolderSegment(value: string | null | undefined) {
   const sanitized = String(value || "")
     .trim()
     .replace(/[\/\\]+/g, "-")
@@ -29,11 +29,12 @@ function sanitizeCloudinaryFolderSegment(value: string | null | undefined) {
   return sanitized || "sin-nombre";
 }
 
-function buildCloudinaryFolder(
+export function buildCloudinaryFolder(
   codigoObra: string,
   fecha: Date,
   piso: string | null | undefined,
-  nombreSellador: string | null | undefined
+  nombreSellador: string | null | undefined,
+  subfolder: string = "registros"
 ) {
   const year = String(fecha.getFullYear());
   const yyyy = fecha.getFullYear();
@@ -43,7 +44,7 @@ function buildCloudinaryFolder(
   const pisoSegment = sanitizeCloudinaryFolderSegment(`Piso ${piso || "sin-piso"}`);
   const selladorSegment = sanitizeCloudinaryFolderSegment(nombreSellador);
 
-  return `BeckSoluciones/${year}/${obraSegment}/${pisoSegment}/${yyyy}-${mm}-${dd}/${selladorSegment}/registros`;
+  return `BeckSoluciones/${year}/${obraSegment}/${pisoSegment}/${yyyy}-${mm}-${dd}/${selladorSegment}/${subfolder}`;
 }
 
 function getParamValue(value: string | string[] | undefined) {

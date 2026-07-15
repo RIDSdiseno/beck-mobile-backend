@@ -9,10 +9,12 @@ import {
   marcarInspeccionIngenieria,
   rechazarRegistroIngenieria,
   updateRegistroIngenieria,
+  uploadControlInspeccionFotos,
   validarRegistroIngenieria,
 } from "../controllers/ingenieria.controller";
 import { descargarRegistroPdf } from "../controllers/registroPdf.controller";
 import { verifyAppToken } from "../middlewares/auth.middleware";
+import { uploadControlInspeccionFotosFiles } from "../middlewares/upload.middleware";
 
 const router = Router();
 
@@ -27,5 +29,11 @@ router.put("/registros/:id/rechazar", verifyAppToken, rechazarRegistroIngenieria
 router.patch("/registros/:id/inspeccion", verifyAppToken, marcarInspeccionIngenieria);
 router.get("/registros/:id/control-inspeccion", verifyAppToken, getControlInspeccion);
 router.post("/registros/:id/control-inspeccion", verifyAppToken, createControlInspeccion);
+router.post(
+  "/registros/:id/control-inspeccion/:controlId/fotos",
+  verifyAppToken,
+  uploadControlInspeccionFotosFiles,
+  uploadControlInspeccionFotos
+);
 
 export default router;

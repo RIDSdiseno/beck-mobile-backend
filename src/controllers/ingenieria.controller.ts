@@ -6,6 +6,14 @@ import {
   ResultadoParametroInspeccion,
 } from "@prisma/client";
 import { prisma } from "../config/prisma";
+import {
+  deleteImageFromCloudinary,
+  uploadBufferToCloudinary,
+} from "../services/cloudinary.service";
+import { buildCloudinaryFolder } from "./registros.controller";
+
+const MIN_CONTROL_INSPECCION_FOTOS = 1;
+const MAX_CONTROL_INSPECCION_FOTOS = 5;
 
 const ESTADOS_INGENIERIA = [
   EstadoRegistroTerreno.pendiente,
@@ -851,6 +859,9 @@ export async function getControlInspeccion(req: Request, res: Response) {
         usuarios: {
           select: { id: true, nombre: true, email: true },
         },
+        fotos_control_inspeccion: {
+          orderBy: { created_at: "asc" },
+        },
       },
       orderBy: { created_at: "desc" },
     });
@@ -948,6 +959,7 @@ export async function createControlInspeccion(req: Request, res: Response) {
         include: {
           controles_inspeccion_parametros: { orderBy: { orden: "asc" } },
           usuarios: { select: { id: true, nombre: true, email: true } },
+          fotos_control_inspeccion: true,
         },
       }),
       prisma.registros_terreno.update({
@@ -960,5 +972,98 @@ export async function createControlInspeccion(req: Request, res: Response) {
   } catch (error) {
     console.error("CREATE CONTROL INSPECCION ERROR:", error);
     return res.status(500).json({ success: false, error: "No se pudo crear el control de inspección" });
+  }
+}
+
+export async function uploadControlInspeccionFotos(req: Request, res: Response) {
+  try {
+    if (!ensureIngenieria(req, res)) return;
+
+    const registroId = getParamValue(req.params.id);
+    const controlId = getParamValue(req.params.controlId);
+    const userId = req.user!.id;
+    const files = req.files as Express.Multer.File[] | undefined;
+
+    if (!registroId || !controlId) {
+      return res.status(400).json({ success: false, error: "Falta id del registro o del control" });
+    }
+
+    if (!files || files.length < MIN_CONTROL_INSPECCION_FOTOS || files.length > MAX_CONTROL_INSPECCION_FOTOS) {
+      return res.status(400).json({
+        success: false,
+        error: `Debes subir entre ${MIN_CONTROL_INSPECCION_FOTOS} y ${MAX_CONTROL_INSPECCION_FOTOS} fotografías`,
+      });
+    }
+
+    const control = await prisma.controles_inspeccion.findUnique({
+      where: { id: controlId },
+      include: {
+        registros_terreno: {
+          include: { obras: { select: { codigo: true } } },
+        },
+      },
+    });
+
+    if (!control || control.registro_terreno_id !== registroId) {
+      return res.status(404).json({ success: false, error: "Control de inspección no encontrado" });
+    }
+
+    const registro = control.registros_terreno;
+    const folder = buildCloudinaryFolder(
+      registro.obras?.codigo || registro.obra_id || "sin-obra",
+      new Date(registro.fecha),
+      registro.piso,
+      registro.nombre_sellador,
+      "control-inspeccion"
+    );
+
+    const uploadedResults: {
+      secure_url: string;
+      public_id: string;
+      format: string;
+      bytes: number;
+      originalname: string;
+    }[] = [];
+
+    try {
+      for (const file of files) {
+        const result = await uploadBufferToCloudinary(file.buffer, { folder });
+
+        uploadedResults.push({
+          secure_url: result.secure_url,
+          public_id: result.public_id,
+          format: result.format,
+          bytes: result.bytes,
+          originalname: file.originalname,
+        });
+      }
+
+      const fotos = await prisma.$transaction(
+        uploadedResults.map((uploaded) =>
+          prisma.fotos_control_inspeccion.create({
+            data: {
+              control_inspeccion_id: controlId,
+              url: uploaded.secure_url,
+              public_id: uploaded.public_id,
+              nombre_archivo: uploaded.originalname,
+              formato: uploaded.format,
+              bytes: uploaded.bytes,
+              subido_por_id: userId,
+            },
+          })
+        )
+      );
+
+      return res.status(201).json({ success: true, data: fotos });
+    } catch (uploadError) {
+      await Promise.allSettled(
+        uploadedResults.map((foto) => deleteImageFromCloudinary(foto.public_id))
+      );
+
+      throw uploadError;
+    }
+  } catch (error) {
+    console.error("UPLOAD CONTROL INSPECCION FOTOS ERROR:", error);
+    return res.status(500).json({ success: false, error: "No se pudieron subir las fotografías" });
   }
 }

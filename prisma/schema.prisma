@@ -427,6 +427,23 @@ model fotos_registro {
   @@index([subido_por_id], map: "idx_fotos_registro_subido_por_id")
 }
 
+model fotos_control_inspeccion {
+  id                    String               @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  control_inspeccion_id String               @db.Uuid
+  url                   String
+  public_id             String               @db.VarChar(255)
+  nombre_archivo        String?              @db.VarChar(255)
+  formato               String?              @db.VarChar(50)
+  bytes                 Int?
+  subido_por_id         String?              @db.Uuid
+  created_at            DateTime             @default(now()) @db.Timestamp(6)
+  controles_inspeccion  controles_inspeccion @relation(fields: [control_inspeccion_id], references: [id], onDelete: Cascade, map: "fk_fotos_control_inspeccion_control")
+  usuarios              usuarios?            @relation(fields: [subido_por_id], references: [id], map: "fk_fotos_control_inspeccion_usuario")
+
+  @@index([control_inspeccion_id], map: "idx_fotos_control_inspeccion_control_id")
+  @@index([subido_por_id], map: "idx_fotos_control_inspeccion_subido_por_id")
+}
+
 model usuarios {
   id                                                                           String                                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   nombre                                                                       String                                @db.VarChar(255)
@@ -455,6 +472,7 @@ model usuarios {
   registros_terreno                                                            registros_terreno[]
   registros_terreno_registros_terreno_validado_cliente_por_idTousuarios        registros_terreno[]                   @relation("registros_terreno_validado_cliente_por_idTousuarios")
   registros_terreno_registros_terreno_inspeccion_revision_por_idTousuarios     registros_terreno[]                   @relation("registros_terreno_inspeccion_revision_por_idTousuarios")
+  fotos_control_inspeccion                                                     fotos_control_inspeccion[]
   usuarios_obras                                                               usuarios_obras[]
 
   @@index([activo])
@@ -702,6 +720,7 @@ model controles_inspeccion {
   usuarios                        usuarios                          @relation(fields: [ingeniero_id], references: [id])
   registros_terreno               registros_terreno                 @relation(fields: [registro_terreno_id], references: [id], onDelete: Cascade)
   controles_inspeccion_parametros controles_inspeccion_parametros[]
+  fotos_control_inspeccion        fotos_control_inspeccion[]
 
   @@index([conformidad])
   @@index([fecha])
