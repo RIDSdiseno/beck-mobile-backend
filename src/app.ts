@@ -6,6 +6,7 @@ import authRoutes from "./routes/auth.routes";
 import clienteRoutes from "./routes/cliente.routes";
 import ingenieriaRoutes from "./routes/ingenieria.routes";
 import itemizadoOpcionesRoutes from "./routes/itemizadoOpciones.routes";
+import jefeobraRoutes from "./routes/jefeobra.routes";
 import obrasRoutes from "./routes/obras.routes";
 import registrosRoutes from "./routes/registros.routes";
 
@@ -38,6 +39,7 @@ app.use("/api/mobile/auth", authRoutes);
 app.use("/api/cliente", clienteRoutes);
 app.use("/api/ingenieria", ingenieriaRoutes);
 app.use("/api/itemizado-opciones", itemizadoOpcionesRoutes);
+app.use("/api/jefeobra", jefeobraRoutes);
 app.use("/api/obras", obrasRoutes);
 app.use("/api/registros", registrosRoutes);
 

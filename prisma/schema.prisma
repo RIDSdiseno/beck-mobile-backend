@@ -456,7 +456,10 @@ model usuarios {
   azure_id                                                                     String?                               @unique @db.VarChar(255)
   alertas_vistas                                                               alertas_vistas[]
   configuracion_vista_cliente_usuario                                          configuracion_vista_cliente_usuario[]
-  controles_inspeccion                                                         controles_inspeccion[]
+  controles_inspeccion                                                         controles_inspeccion[]                @relation("ControlesInspeccionPorIngeniero")
+  controles_inspeccion_correccion_enviada                                      controles_inspeccion[]                @relation("ControlesInspeccionCorreccionEnviadaPor")
+  controles_inspeccion_parametros_corregidos                                   controles_inspeccion_parametros[]
+  fotos_correccion_parametro                                                   fotos_correccion_parametro[]
   cotizaciones                                                                 cotizaciones[]
   fotos_registro                                                               fotos_registro[]
   historial_etapas_beck                                                        historial_etapas_beck[]
@@ -715,9 +718,12 @@ model controles_inspeccion {
   conformidad                     EstadoConformidadInspeccion?
   foto_inspeccion_url             String?
   foto_no_conformidad_url         String?
+  correccion_enviada_at           DateTime?                         @db.Timestamp(6)
+  correccion_enviada_por_id       String?                           @db.Uuid
   created_at                      DateTime                          @default(now()) @db.Timestamp(6)
   updated_at                      DateTime                          @default(now()) @db.Timestamp(6)
-  usuarios                        usuarios                          @relation(fields: [ingeniero_id], references: [id])
+  usuarios                        usuarios                          @relation("ControlesInspeccionPorIngeniero", fields: [ingeniero_id], references: [id])
+  usuarios_correccion_enviada_por usuarios?                         @relation("ControlesInspeccionCorreccionEnviadaPor", fields: [correccion_enviada_por_id], references: [id])
   registros_terreno               registros_terreno                 @relation(fields: [registro_terreno_id], references: [id], onDelete: Cascade)
   controles_inspeccion_parametros controles_inspeccion_parametros[]
   fotos_control_inspeccion        fotos_control_inspeccion[]
@@ -729,19 +735,41 @@ model controles_inspeccion {
 }
 
 model controles_inspeccion_parametros {
-  id                    String                       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  control_inspeccion_id String                       @db.Uuid
-  orden                 Int
-  parametro             String                       @db.VarChar(500)
-  resultado             ResultadoParametroInspeccion
-  observacion           String?
-  created_at            DateTime                     @default(now()) @db.Timestamp(6)
-  updated_at            DateTime                     @default(now()) @db.Timestamp(6)
-  controles_inspeccion  controles_inspeccion         @relation(fields: [control_inspeccion_id], references: [id], onDelete: Cascade)
+  id                     String                       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  control_inspeccion_id  String                       @db.Uuid
+  orden                  Int
+  parametro              String                       @db.VarChar(500)
+  resultado              ResultadoParametroInspeccion
+  observacion            String?
+  correccion_observacion String?
+  corregido_at           DateTime?                    @db.Timestamp(6)
+  corregido_por_id       String?                       @db.Uuid
+  created_at             DateTime                     @default(now()) @db.Timestamp(6)
+  updated_at             DateTime                     @default(now()) @db.Timestamp(6)
+  controles_inspeccion   controles_inspeccion         @relation(fields: [control_inspeccion_id], references: [id], onDelete: Cascade)
+  usuarios               usuarios?                    @relation(fields: [corregido_por_id], references: [id], map: "fk_controles_inspeccion_parametros_corregido_por")
+  fotos_correccion_parametro fotos_correccion_parametro[]
 
   @@index([control_inspeccion_id])
   @@index([orden])
   @@index([resultado])
+}
+
+model fotos_correccion_parametro {
+  id             String                         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  parametro_id   String                         @db.Uuid
+  url            String
+  public_id      String                         @db.VarChar(255)
+  nombre_archivo String?                        @db.VarChar(255)
+  formato        String?                        @db.VarChar(50)
+  bytes          Int?
+  subido_por_id  String?                        @db.Uuid
+  created_at     DateTime                       @default(now()) @db.Timestamp(6)
+  controles_inspeccion_parametros controles_inspeccion_parametros @relation(fields: [parametro_id], references: [id], onDelete: Cascade, map: "fk_fotos_correccion_parametro_parametro")
+  usuarios       usuarios?                      @relation(fields: [subido_por_id], references: [id], map: "fk_fotos_correccion_parametro_usuario")
+
+  @@index([parametro_id], map: "idx_fotos_correccion_parametro_parametro_id")
+  @@index([subido_por_id], map: "idx_fotos_correccion_parametro_subido_por_id")
 }
 
 model obra_tipos_registro {

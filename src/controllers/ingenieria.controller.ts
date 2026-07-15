@@ -855,6 +855,7 @@ export async function getControlInspeccion(req: Request, res: Response) {
       include: {
         controles_inspeccion_parametros: {
           orderBy: { orden: "asc" },
+          include: { fotos_correccion_parametro: true },
         },
         usuarios: {
           select: { id: true, nombre: true, email: true },
@@ -957,14 +958,31 @@ export async function createControlInspeccion(req: Request, res: Response) {
           },
         },
         include: {
-          controles_inspeccion_parametros: { orderBy: { orden: "asc" } },
+          controles_inspeccion_parametros: {
+            orderBy: { orden: "asc" },
+            include: { fotos_correccion_parametro: true },
+          },
           usuarios: { select: { id: true, nombre: true, email: true } },
           fotos_control_inspeccion: true,
         },
       }),
       prisma.registros_terreno.update({
         where: { id: registroId },
-        data: { inspeccion_estado: "inspeccionado" },
+        data:
+          conformidad === "no_conforme"
+            ? {
+                inspeccion_estado: "inspeccionado",
+                inspeccion_revision_estado: "rechazado",
+                inspeccion_revision_at: new Date(),
+                inspeccion_revision_por_id: req.user!.id,
+              }
+            : {
+                inspeccion_estado: "inspeccionado",
+                inspeccion_revision_estado: "validado",
+                inspeccion_revision_at: new Date(),
+                inspeccion_revision_por_id: req.user!.id,
+                motivo_rechazo_inspeccion: null,
+              },
       }),
     ]);
 
