@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import { prisma } from "../config/prisma";
 import { getMisObrasByUser } from "../services/obras.service";
 
-type RolConfiguracionRegistro = "trabajador" | "jefeobra";
+type RolConfiguracionRegistro = "trabajador" | "jefeobra" | "cliente";
 type ColorCampoRegistro = "verde" | "azul" | "rojo";
 
 type CampoRegistroConfig = {
@@ -66,12 +66,35 @@ const CAMPOS_REGISTRO_TRABAJADOR: CampoRegistroConfig[] =
     };
   });
 
+// Cliente ve el registro ya finalizado en modo solo lectura, por eso el
+// catalogo mapea directamente a los nombres de RegistroCliente (services/api/clienteApi.ts)
+// en vez de a los nombres de estado del formulario de terreno/jefeobra.
+const CAMPOS_REGISTRO_CLIENTE: CampoRegistroConfig[] = [
+  { campo: "codigoBeck", appCampo: "codigoBeck", color: "azul" },
+  { campo: "itemizadoBeck", appCampo: "itemizadoBeck", color: "azul" },
+  { campo: "itemizadoMandante", appCampo: "itemizadoMandante", color: "azul" },
+  { campo: "diaSemana", appCampo: "diaSemana", color: "azul" },
+  { campo: "piso", appCampo: "piso", color: "azul" },
+  { campo: "eje_alfabetico", appCampo: "eje", color: "azul" },
+  { campo: "nombreSellador", appCampo: "nombreSellador", color: "azul" },
+  { campo: "recinto", appCampo: "recinto", color: "azul" },
+  { campo: "modulo", appCampo: "modulo", color: "azul" },
+  { campo: "numeroSello", appCampo: "numeroSello", color: "azul" },
+  { campo: "cantidadSellos", appCampo: "cantidadSellos", color: "azul" },
+  { campo: "holgura", appCampo: "holgura", color: "azul" },
+  { campo: "factor_por_holguras", appCampo: "factorPorHolguras", color: "azul" },
+  { campo: "accesibilidad", appCampo: "cieloModular", color: "azul" },
+  { campo: "cantidad_final", appCampo: "cantidadFinal", color: "azul" },
+  { campo: "folio", appCampo: "folio", color: "azul" },
+];
+
 const CAMPOS_REGISTRO_POR_ROL: Record<
   RolConfiguracionRegistro,
   CampoRegistroConfig[]
 > = {
   jefeobra: CAMPOS_REGISTRO_JEFEOBRA,
   trabajador: CAMPOS_REGISTRO_TRABAJADOR,
+  cliente: CAMPOS_REGISTRO_CLIENTE,
 };
 
 export async function getMisObras(req: Request, res: Response) {
@@ -122,7 +145,7 @@ export async function getConfiguracionRegistro(req: Request, res: Response) {
       });
     }
 
-    if (rol !== "terreno" && rol !== "jefeobra") {
+    if (rol !== "terreno" && rol !== "jefeobra" && rol !== "cliente") {
       return res.status(403).json({
         success: false,
         error: "Tu rol no utiliza configuracion de registro movil",
@@ -138,7 +161,7 @@ export async function getConfiguracionRegistro(req: Request, res: Response) {
     }
 
     const rolConfiguracion: RolConfiguracionRegistro =
-      rol === "terreno" ? "trabajador" : "jefeobra";
+      rol === "terreno" ? "trabajador" : rol === "cliente" ? "cliente" : "jefeobra";
     const catalogo = CAMPOS_REGISTRO_POR_ROL[rolConfiguracion];
     const camposCatalogo = catalogo.map((campo) => campo.campo);
 

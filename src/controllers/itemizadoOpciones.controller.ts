@@ -67,14 +67,18 @@ export async function getItemizadoOpciones(req: Request, res: Response) {
 
     const configs = await prisma.configuracion_itemizado_opcion_obra.findMany({
       where: { obra_id: obraId, itemizado_opcion_id: { in: opciones.map((o) => o.id) } },
-      select: { itemizado_opcion_id: true, visible: true },
+      select: { itemizado_opcion_id: true, visible: true, nombre_personalizado: true },
     });
-    const configMap = new Map(configs.map((c) => [c.itemizado_opcion_id, c.visible]));
+    const configMap = new Map(configs.map((c) => [c.itemizado_opcion_id, c]));
 
-    const conVisibilidadObra = opciones.map((op) => ({
-      ...op,
-      visible: configMap.has(op.id) ? configMap.get(op.id) : op.visible,
-    }));
+    const conVisibilidadObra = opciones.map((op) => {
+      const config = configMap.get(op.id);
+      return {
+        ...op,
+        visible: config ? config.visible : op.visible,
+        nombre_personalizado: config?.nombre_personalizado ?? null,
+      };
+    });
 
     const filtradas =
       visibleParam === "false"
