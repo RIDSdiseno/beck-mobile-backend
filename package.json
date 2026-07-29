@@ -1,6 +1,10 @@
 {
   "name": "beck-mobile-backend",
   "version": "1.0.0",
+  "engines": {
+    "node": ">=22 <25"
+  },
+  "packageManager": "npm@10.8.2",
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
