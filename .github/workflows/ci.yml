@@ -1,0 +1,36 @@
+name: Validación
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+        env:
+          JWT_SECRET: secreto-de-pruebas-con-mas-de-32-caracteres
+          CLOUDINARY_CLOUD_NAME: pruebas
+          CLOUDINARY_API_KEY: pruebas
+          CLOUDINARY_API_SECRET: pruebas
+          DATABASE_URL: postgresql://pruebas:pruebas@localhost:5432/pruebas
+          DATABASE_SSL: "false"
+      - run: npm test -- --runInBand
+        env:
+          JWT_SECRET: secreto-de-pruebas-con-mas-de-32-caracteres
+          CLOUDINARY_CLOUD_NAME: pruebas
+          CLOUDINARY_API_KEY: pruebas
+          CLOUDINARY_API_SECRET: pruebas
+          DATABASE_URL: postgresql://pruebas:pruebas@localhost:5432/pruebas
+          DATABASE_SSL: "false"

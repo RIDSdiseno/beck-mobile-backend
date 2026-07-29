@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env";
+import { prisma } from "../config/prisma";
 
 export type AppJwtPayload = {
   id: string;
@@ -19,7 +20,7 @@ declare global {
   }
 }
 
-export function verifyAppToken(
+export async function verifyAppToken(
   req: Request,
   res: Response,
   next: NextFunction
@@ -36,9 +37,37 @@ export function verifyAppToken(
 
     const token = authHeader.replace("Bearer ", "").trim();
 
-    const decoded = jwt.verify(token, env.jwtSecret) as AppJwtPayload;
+    const decoded = jwt.verify(token, env.jwtSecret, {
+      algorithms: ["HS256"],
+      issuer: env.jwtIssuer,
+      audience: env.jwtAudience,
+    }) as AppJwtPayload;
 
-    req.user = decoded;
+    const currentUser = await prisma.usuarios.findUnique({
+      where: { id: decoded.id },
+      select: {
+        id: true,
+        nombre: true,
+        email: true,
+        rol: true,
+        activo: true,
+      },
+    });
+
+    if (!currentUser?.activo) {
+      return res.status(401).json({
+        success: false,
+        error: "La sesión ya no está autorizada",
+        code: "SESSION_REVOKED",
+      });
+    }
+
+    req.user = {
+      ...decoded,
+      nombre: currentUser.nombre,
+      email: currentUser.email,
+      rol: currentUser.rol,
+    };
     next();
   } catch {
     return res.status(401).json({

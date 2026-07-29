@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { verifyAppToken } from "../middlewares/auth.middleware";
+import { checkRole, verifyAppToken } from "../middlewares/auth.middleware";
 import { uploadRegistroFotosFiles } from "../middlewares/upload.middleware";
 import {
   createRegistro,
@@ -15,7 +15,12 @@ import {
 const router = Router();
 
 router.get("/mis-registros", verifyAppToken, getMisRegistros);
-router.post("/", verifyAppToken, createRegistro);
+router.post(
+  "/",
+  verifyAppToken,
+  checkRole("terreno", "jefeobra", "administrador"),
+  createRegistro,
+);
 router.delete("/:id", verifyAppToken, deleteRegistroPendiente);
 router.put("/:id/enviar-ingenieria", verifyAppToken, updateRegistroJefeObra);
 router.put("/:id/reenviar-tecnico", verifyAppToken, updateRegistroTecnico);

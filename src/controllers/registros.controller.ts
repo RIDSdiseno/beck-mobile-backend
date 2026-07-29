@@ -4,7 +4,9 @@ import { prisma } from "../config/prisma";
 import {
   deleteImageFromCloudinary,
   uploadBufferToCloudinary,
+  withPrivateImageUrl,
 } from "../services/cloudinary.service";
+import { canAccessObra } from "../services/obras.service";
 
 function getDiaSemana(fecha: Date) {
   const dias = [
@@ -106,38 +108,6 @@ function isAdmin(role: string | undefined) {
   return role === "administrador";
 }
 
-function canUseAvailableObras(role: string | undefined) {
-  return role === "terreno" || role === "jefeobra";
-}
-
-function isObraOperable(estado: EstadoObra) {
-  return estado === EstadoObra.activa || estado === EstadoObra.pausada;
-}
-
-async function canAccessObra(userId: string, role: string | undefined, obraId: string) {
-  if (isAdmin(role)) return true;
-
-  if (canUseAvailableObras(role)) {
-    const obra = await prisma.obras.findUnique({
-      where: { id: obraId },
-      select: { estado: true },
-    });
-
-    return Boolean(obra && isObraOperable(obra.estado));
-  }
-
-  const asignacion = await prisma.usuarios_obras.findUnique({
-    where: {
-      usuario_id_obra_id: {
-        usuario_id: userId,
-        obra_id: obraId,
-      },
-    },
-  });
-
-  return Boolean(asignacion);
-}
-
 async function canModifyRegistro(
   userId: string,
   role: string | undefined,
@@ -159,6 +129,13 @@ export async function createRegistro(req: Request, res: Response) {
       return res.status(401).json({
         success: false,
         error: "Usuario no autenticado",
+      });
+    }
+
+    if (!["terreno", "jefeobra", "administrador"].includes(userRole || "")) {
+      return res.status(403).json({
+        success: false,
+        error: "Tu rol no puede crear registros de terreno",
       });
     }
 
@@ -423,6 +400,7 @@ export async function getMisRegistros(req: Request, res: Response) {
       orderBy: {
         created_at: "desc",
       },
+      take: 100,
       include: {
         obras: {
           select: {
@@ -445,6 +423,8 @@ export async function getMisRegistros(req: Request, res: Response) {
           select: {
             id: true,
             url: true,
+            public_id: true,
+            formato: true,
             created_at: true,
           },
           orderBy: {
@@ -473,6 +453,8 @@ export async function getMisRegistros(req: Request, res: Response) {
               select: {
                 id: true,
                 url: true,
+                public_id: true,
+                formato: true,
                 created_at: true,
               },
               orderBy: {
@@ -488,19 +470,28 @@ export async function getMisRegistros(req: Request, res: Response) {
       id: string;
       foto_url?: string | null;
       fotos_urls?: string[] | null;
-      fotos?: { id: string; url: string; created_at: Date }[];
+      fotos?: {
+        id: string;
+        url: string;
+        public_id: string;
+        formato?: string | null;
+        created_at: Date;
+      }[];
     }) => {
       const relationFotos = (registro.fotos || []).filter((foto) => foto.url);
-      const fallbackUrls = [
-        ...(Array.isArray(registro.fotos_urls) ? registro.fotos_urls : []),
-        registro.foto_url,
-      ].filter((url): url is string => Boolean(url));
+      const fallbackUrls =
+        relationFotos.length > 0
+          ? []
+          : [
+              ...(Array.isArray(registro.fotos_urls) ? registro.fotos_urls : []),
+              registro.foto_url,
+            ].filter((url): url is string => Boolean(url));
 
       const seen = new Set<string>();
       const normalized = [
         ...relationFotos.map((foto) => ({
           id: foto.id,
-          url: foto.url,
+          url: withPrivateImageUrl(foto).url,
           created_at: foto.created_at,
         })),
         ...fallbackUrls.map((url, index) => ({
@@ -581,6 +572,18 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
       return res.status(404).json({
         success: false,
         error: "Registro no encontrado",
+      });
+    }
+
+    if (
+      currentRegistro.estado === EstadoRegistroTerreno.validado ||
+      currentRegistro.estado === EstadoRegistroTerreno.en_revision ||
+      currentRegistro.validado_cliente
+    ) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro ya está en revisión o validado y no puede modificarse",
+        code: "REGISTRO_LOCKED",
       });
     }
 
@@ -696,8 +699,12 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
       });
     }
 
-    const registro = await prisma.registros_terreno.update({
-      where: { id: registroId },
+    const transition = await prisma.registros_terreno.updateMany({
+      where: {
+        id: registroId,
+        estado: currentRegistro.estado,
+        validado_cliente: false,
+      },
       data: {
         fecha: fechaDate,
         dia_semana: getDiaSemana(fechaDate),
@@ -765,6 +772,16 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
         devuelto_a_tecnico: false,
         updated_at: new Date(),
       },
+    });
+    if (transition.count !== 1) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro cambió de estado mientras se actualizaba",
+        code: "ESTADO_CONFLICTO",
+      });
+    }
+    const registro = await prisma.registros_terreno.findUniqueOrThrow({
+      where: { id: registroId },
     });
 
     return res.json({
@@ -845,13 +862,23 @@ export async function devolverRegistroATecnico(req: Request, res: Response) {
       }
     }
 
-    const registro = await prisma.registros_terreno.update({
-      where: { id: registroId },
+    const transition = await prisma.registros_terreno.updateMany({
+      where: { id: registroId, estado: EstadoRegistroTerreno.rechazado },
       data: {
         estado: "rechazado",
         devuelto_a_tecnico: true,
         updated_at: new Date(),
       },
+    });
+    if (transition.count !== 1) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro cambió de estado mientras se enviaba al técnico",
+        code: "ESTADO_CONFLICTO",
+      });
+    }
+    const registro = await prisma.registros_terreno.findUniqueOrThrow({
+      where: { id: registroId },
     });
 
     return res.json({
@@ -1105,8 +1132,8 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
       });
     }
 
-    const registro = await prisma.registros_terreno.update({
-      where: { id: registroId },
+    const transition = await prisma.registros_terreno.updateMany({
+      where: { id: registroId, estado: EstadoRegistroTerreno.pendiente },
       data: {
         fecha: fechaDate,
         dia_semana: getDiaSemana(fechaDate),
@@ -1181,6 +1208,16 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
         updated_at: new Date(),
       },
     });
+    if (transition.count !== 1) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro cambió de estado mientras se enviaba a ingeniería",
+        code: "ESTADO_CONFLICTO",
+      });
+    }
+    const registro = await prisma.registros_terreno.findUniqueOrThrow({
+      where: { id: registroId },
+    });
 
     return res.json({
       success: true,
@@ -1231,6 +1268,27 @@ export async function updateRegistroObservaciones(req: Request, res: Response) {
       return res.status(404).json({
         success: false,
         error: "Registro no encontrado",
+      });
+    }
+
+    const currentState = await prisma.registros_terreno.findUnique({
+      where: { id: registroId },
+      select: { estado: true, validado_cliente: true },
+    });
+    if (
+      !currentState ||
+      !(new Set<EstadoRegistroTerreno>([
+        EstadoRegistroTerreno.pendiente,
+        EstadoRegistroTerreno.rechazado,
+      ])).has(
+        currentState.estado,
+      ) ||
+      currentState.validado_cliente
+    ) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro ya está en revisión o validado y no puede modificarse",
+        code: "REGISTRO_LOCKED",
       });
     }
 
@@ -1306,6 +1364,22 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
       });
     }
 
+    if (
+      !(new Set<EstadoRegistroTerreno>([
+        EstadoRegistroTerreno.pendiente,
+        EstadoRegistroTerreno.rechazado,
+      ])).has(
+        registro.estado,
+      ) ||
+      registro.validado_cliente
+    ) {
+      return res.status(409).json({
+        success: false,
+        error: "Las fotografías de este registro están bloqueadas",
+        code: "REGISTRO_LOCKED",
+      });
+    }
+
     const hasAccess = await canModifyRegistro(userId, userRole, registro);
 
     if (!hasAccess) {
@@ -1352,6 +1426,17 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
           select: { id: true, public_id: true },
         })
       : [];
+    const existingPhotoCount = replaceExisting
+      ? 0
+      : await prisma.fotos_registro.count({
+          where: { registro_id: registro.id },
+        });
+    if (existingPhotoCount + files.length > 10) {
+      return res.status(400).json({
+        success: false,
+        error: "Puedes guardar hasta 10 fotografías por registro",
+      });
+    }
     const uploadedResults: {
       secure_url: string;
       public_id: string;
@@ -1433,7 +1518,7 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
 
       return res.json({
         success: true,
-        data: uploadedFotos,
+        data: uploadedFotos.map((foto) => withPrivateImageUrl(foto)),
         message: replaceExisting
           ? "Fotografias reemplazadas correctamente"
           : "Fotos subidas correctamente",

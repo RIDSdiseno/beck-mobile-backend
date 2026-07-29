@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import { prisma } from "../config/prisma";
+import { canAccessObra } from "../services/obras.service";
 
 function getQueryValue(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -21,6 +22,17 @@ export async function getItemizadoOpciones(req: Request, res: Response) {
       Number.isFinite(limitValue) && limitValue > 0
         ? Math.min(Math.trunc(limitValue), 100)
         : 80;
+
+    if (obraId) {
+      const userId = req.user?.id;
+      const role = req.user?.rol;
+      if (!userId || !(await canAccessObra(userId, role, obraId))) {
+        return res.status(403).json({
+          success: false,
+          error: "No tienes acceso al itemizado de esta obra",
+        });
+      }
+    }
 
     const opciones = await prisma.itemizado_opciones.findMany({
       where: {

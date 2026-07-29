@@ -14,10 +14,6 @@ jest.mock("../config/prisma", () => ({
   },
 }));
 
-jest.mock("../services/microsoftAuth.service", () => ({
-  verifyMicrosoftIdToken: jest.fn(),
-}));
-
 jest.mock("bcryptjs", () => ({
   compare: jest.fn(),
   hash:    jest.fn(),
@@ -25,8 +21,6 @@ jest.mock("bcryptjs", () => ({
 
 // ── Variables de entorno mínimas para que env.ts no explote ─────────────────
 process.env.JWT_SECRET          = "test-secret-key-minimo-32-caracteres!!";
-process.env.AZURE_AD_CLIENT_ID  = "test-client-id";
-process.env.AZURE_AD_TENANT_ID  = "test-tenant-id";
 process.env.CLOUDINARY_CLOUD_NAME = "test-cloud";
 process.env.CLOUDINARY_API_KEY    = "test-key";
 process.env.CLOUDINARY_API_SECRET = "test-secret";
@@ -133,7 +127,7 @@ describe("POST /api/mobile/auth/email", () => {
     expect(res.body.user.rol).toBe("cliente");
   });
 
-  it("bloquea a usuario Beck con dominio externo (no cliente)", async () => {
+  it("permite las credenciales creadas en CRM aunque usen dominio externo", async () => {
     const usuarioExterno = { ...USUARIO_BECK, email: "terreno@gmail.com" };
     mockFindFirst.mockResolvedValue(usuarioExterno);
     bcryptCompare.mockResolvedValue(true);
@@ -142,8 +136,8 @@ describe("POST /api/mobile/auth/email", () => {
       .post("/api/mobile/auth/email")
       .send({ email: "terreno@gmail.com", password: "correcta" });
 
-    expect(res.status).toBe(400);
-    expect(res.body.success).toBe(false);
+    expect(res.status).toBe(200);
+    expect(res.body.user.rol).toBe("terreno");
   });
 });
 
