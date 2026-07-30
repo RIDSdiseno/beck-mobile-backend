@@ -37,6 +37,6 @@ export const env = {
   cloudinaryCloudName: required("CLOUDINARY_CLOUD_NAME"),
   cloudinaryApiKey: required("CLOUDINARY_API_KEY"),
   cloudinaryApiSecret: required("CLOUDINARY_API_SECRET"),
-  databaseSsl: process.env.DATABASE_SSL !== "false",
+  databaseSsl: process.env.DATABASE_SSL === "true",
   trustProxy: process.env.TRUST_PROXY || (isProduction ? "1" : "false"),
 };

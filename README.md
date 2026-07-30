@@ -51,15 +51,15 @@ CLOUDINARY_API_SECRET=tu_api_secret
 
 # PostgreSQL — Requerida (Prisma la lee directamente)
 DATABASE_URL=postgresql://usuario:password@host:5432/beck_db
-DATABASE_SSL=true
+DATABASE_SSL=false
 DATABASE_SSL_REJECT_UNAUTHORIZED=false
 DATABASE_POOL_MAX=10
 ```
 
-Railway usa TLS con un certificado administrado por su infraestructura, por lo
-que `DATABASE_SSL_REJECT_UNAUTHORIZED` debe permanecer en `false`. Solo se debe
-usar `true` cuando PostgreSQL entregue una cadena de certificados verificable
-por el sistema.
+Railway conecta el servicio con PostgreSQL mediante su red privada, por lo que
+`DATABASE_SSL` debe permanecer en `false`. Para una base externa que requiera
+TLS, se puede activar y decidir si la cadena del certificado debe validarse con
+`DATABASE_SSL_REJECT_UNAUTHORIZED`.
 
 > **Nota de seguridad:** El servidor falla al iniciar (`throw new Error`) si falta alguna variable requerida o si `JWT_SECRET` tiene menos de 32 caracteres. Esto es intencional para evitar deployar con configuración incompleta.
 >
