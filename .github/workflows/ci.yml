@@ -1,0 +1,41 @@
+name: Validación
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install --global npm@10.8.2
+      - run: npm ci
+      - run: npm run build
+        env:
+          JWT_SECRET: secreto-de-pruebas-con-mas-de-32-caracteres
+          AZURE_AD_CLIENT_ID: cliente-de-pruebas
+          AZURE_AD_TENANT_ID: tenant-de-pruebas
+          CLOUDINARY_CLOUD_NAME: pruebas
+          CLOUDINARY_API_KEY: pruebas
+          CLOUDINARY_API_SECRET: pruebas
+          DATABASE_URL: postgresql://pruebas:pruebas@localhost:5432/pruebas
+          DATABASE_SSL: "false"
+      - run: npm test -- --runInBand
+        env:
+          JWT_SECRET: secreto-de-pruebas-con-mas-de-32-caracteres
+          AZURE_AD_CLIENT_ID: cliente-de-pruebas
+          AZURE_AD_TENANT_ID: tenant-de-pruebas
+          CLOUDINARY_CLOUD_NAME: pruebas
+          CLOUDINARY_API_KEY: pruebas
+          CLOUDINARY_API_SECRET: pruebas
+          DATABASE_URL: postgresql://pruebas:pruebas@localhost:5432/pruebas
+          DATABASE_SSL: "false"

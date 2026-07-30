@@ -1,6 +1,6 @@
 # beck-mobile-backend
 
-Backend REST API para la aplicación móvil de terreno de BECK Soluciones. Gestiona autenticación dual (Microsoft Azure AD + email/contraseña), obras, registros de terreno con fotografías y el flujo de revisión de ingeniería.
+Backend REST API para la aplicación móvil de BECK Soluciones. Gestiona autenticación con credenciales creadas en el CRM, obras, registros de terreno, fotografías privadas y los flujos de ingeniería y cliente.
 
 ## Stack
 
@@ -10,7 +10,7 @@ Backend REST API para la aplicación móvil de terreno de BECK Soluciones. Gesti
 | Framework | Express 5.1 |
 | ORM | Prisma 7.8 + `@prisma/adapter-pg` |
 | Base de datos | PostgreSQL |
-| Autenticación | Azure AD OIDC (`jose`) + JWT propio (`jsonwebtoken`) |
+| Autenticación | Email/contraseña + JWT propio (`jsonwebtoken`) |
 | Almacenamiento de imágenes | Cloudinary |
 | Upload multipart | Multer 2.2 (memoryStorage) |
 | Seguridad HTTP | Helmet, express-rate-limit |
@@ -23,7 +23,6 @@ Backend REST API para la aplicación móvil de terreno de BECK Soluciones. Gesti
 - Node.js 20+
 - Acceso a la base de datos PostgreSQL de BECK
 - Cuenta y credenciales de Cloudinary
-- App registrada en Azure AD (para login Microsoft)
 
 ---
 
@@ -39,13 +38,11 @@ NODE_ENV=development          # "production" enmascara stack traces en logs
 # CORS (opcional — si no se define, no se envían headers CORS)
 CORS_ORIGIN=*                 # Puede ser "*", "http://localhost:3000" o lista separada por comas
 
-# Azure AD — Requeridas
-AZURE_AD_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-AZURE_AD_TENANT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-
 # JWT — Requerida, mínimo 32 caracteres
 JWT_SECRET=cambia_esto_por_un_secreto_seguro_de_al_menos_32_chars
 JWT_EXPIRES_IN=8h             # Opcional, por defecto "8h"
+JWT_ISSUER=beck-mobile-backend
+JWT_AUDIENCE=beck-app
 
 # Cloudinary — Requeridas
 CLOUDINARY_CLOUD_NAME=tu_cloud_name
@@ -54,6 +51,9 @@ CLOUDINARY_API_SECRET=tu_api_secret
 
 # PostgreSQL — Requerida (Prisma la lee directamente)
 DATABASE_URL=postgresql://usuario:password@host:5432/beck_db
+DATABASE_SSL=true
+DATABASE_SSL_REJECT_UNAUTHORIZED=true
+DATABASE_POOL_MAX=10
 ```
 
 > **Nota de seguridad:** El servidor falla al iniciar (`throw new Error`) si falta alguna variable requerida o si `JWT_SECRET` tiene menos de 32 caracteres. Esto es intencional para evitar deployar con configuración incompleta.
@@ -120,7 +120,7 @@ beck-mobile-backend/
 │   │   ├── env.ts             # Carga y valida variables de entorno
 │   │   └── prisma.ts          # Instancia singleton de PrismaClient
 │   ├── controllers/
-│   │   ├── auth.controller.ts         # Login Microsoft y email/contraseña
+│   │   ├── auth.controller.ts         # Login con credenciales del CRM
 │   │   ├── obras.controller.ts        # Mis obras y configuración de registro
 │   │   ├── registros.controller.ts    # CRUD de registros de terreno y fotos
 │   │   ├── ingenieria.controller.ts   # Flujo de revisión de ingeniería
@@ -138,7 +138,6 @@ beck-mobile-backend/
 │   │   └── itemizadoOpciones.routes.ts
 │   ├── services/
 │   │   ├── jwt.service.ts           # signAppToken()
-│   │   ├── microsoftAuth.service.ts # Verificación OIDC con Azure AD (jose)
 │   │   ├── cloudinary.service.ts    # uploadBufferToCloudinary / deleteImageFromCloudinary
 │   │   └── obras.service.ts         # Lógica de negocio de obras
 │   └── types/
@@ -152,18 +151,7 @@ beck-mobile-backend/
 
 ## Flujo de autenticación
 
-El sistema soporta dos métodos de login:
-
-### 1. Microsoft (Azure AD)
-
-```
-App móvil → [obtiene idToken de MSAL] → POST /api/mobile/auth/microsoft
-   → verifyMicrosoftIdToken() valida el idToken con las claves JWKS de Azure
-   → Busca el usuario en DB por azure_id o email
-   → Retorna JWT propio firmado con JWT_SECRET (duración: JWT_EXPIRES_IN)
-```
-
-### 2. Email + contraseña
+El sistema admite únicamente las credenciales creadas desde el CRM:
 
 ```
 POST /api/mobile/auth/email
@@ -172,7 +160,7 @@ POST /api/mobile/auth/email
    → Retorna JWT propio firmado con JWT_SECRET
 ```
 
-> Rate limiting: ambos endpoints aceptan máximo **10 solicitudes por IP cada 15 minutos**.
+> Rate limiting: el endpoint acepta máximo **10 solicitudes por IP cada 15 minutos**.
 
 ### Token JWT propio
 
@@ -214,8 +202,8 @@ El middleware `verifyAppToken` decodifica el token y adjunta el payload a `req.u
 
 | Método | Ruta | Body | Descripción |
 |--------|------|------|-------------|
-| `POST` | `/microsoft` | `{ idToken }` | Login con token OIDC de Microsoft |
 | `POST` | `/email` | `{ email, password }` | Login con correo y contraseña |
+| `POST` | `/microsoft` | `{ idToken }` | Login Microsoft para usuarios activos creados en el CRM |
 
 **Respuesta exitosa:**
 ```json
@@ -253,6 +241,12 @@ El middleware `verifyAppToken` decodifica el token y adjunta el payload a `req.u
 | `PUT` | `/:id/enviar-tecnico` | Jefe de obra devuelve un registro al técnico |
 | `PUT` | `/:id/observaciones` | Actualiza observaciones de un registro |
 | `POST` | `/:id/fotos` | Sube fotografías (multipart `fotos[]`, máx. 10 archivos × 12 MB) |
+
+Los campos `factor_por_holguras`, `cantidad_sellos_con_factores`, `aislacion`,
+`cantidad_sellos_aislacion`, `reparacion_tabique` y `cantidad_final` son
+autoritativos del backend. Se recalculan juntos a partir de los datos base y de
+los tramos de holgura configurados para la obra; cualquier derivado enviado por
+el cliente se ignora.
 
 **Tipos de imagen aceptados:** JPEG, PNG, WebP, HEIC, HEIF
 

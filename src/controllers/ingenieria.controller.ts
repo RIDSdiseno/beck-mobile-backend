@@ -9,7 +9,9 @@ import { prisma } from "../config/prisma";
 import {
   deleteImageFromCloudinary,
   uploadBufferToCloudinary,
+  withPrivateImageUrl,
 } from "../services/cloudinary.service";
+import { calcularCamposConConfiguracion } from "../services/calculosRegistroTerreno.service";
 import { buildCloudinaryFolder } from "./registros.controller";
 
 const MIN_CONTROL_INSPECCION_FOTOS = 1;
@@ -58,20 +60,29 @@ function normalizeRegistroFotos(registro: {
   id: string;
   foto_url?: string | null;
   fotos_urls?: string[] | null;
-  fotos?: { id: string; url: string; created_at: Date }[];
+  fotos?: {
+    id: string;
+    url: string;
+    public_id: string;
+    formato?: string | null;
+    created_at: Date;
+  }[];
 }) {
   const relationFotos = (registro.fotos || []).filter((foto) => foto.url);
-  const fallbackUrls = [
-    ...(Array.isArray(registro.fotos_urls) ? registro.fotos_urls : []),
-    registro.foto_url,
-  ].filter((url): url is string => Boolean(url));
+  const fallbackUrls =
+    relationFotos.length > 0
+      ? []
+      : [
+          ...(Array.isArray(registro.fotos_urls) ? registro.fotos_urls : []),
+          registro.foto_url,
+        ].filter((url): url is string => Boolean(url));
 
   const seen = new Set<string>();
 
   return [
     ...relationFotos.map((foto) => ({
       id: foto.id,
-      url: foto.url,
+      url: withPrivateImageUrl(foto).url,
       created_at: foto.created_at,
     })),
     ...fallbackUrls.map((url, index) => ({
@@ -98,6 +109,23 @@ function mapRegistroIngenieria(registro: any) {
   };
 }
 
+function mapControlPrivatePhotos(control: any) {
+  return {
+    ...control,
+    fotos_control_inspeccion: (control.fotos_control_inspeccion || []).map(
+      withPrivateImageUrl,
+    ),
+    controles_inspeccion_parametros: (
+      control.controles_inspeccion_parametros || []
+    ).map((parametro: any) => ({
+      ...parametro,
+      fotos_correccion_parametro: (
+        parametro.fotos_correccion_parametro || []
+      ).map(withPrivateImageUrl),
+    })),
+  };
+}
+
 export async function findRegistroWithDetails(id: string) {
   return prisma.registros_terreno.findUnique({
     where: { id },
@@ -109,6 +137,7 @@ export async function findRegistroWithDetails(id: string) {
           codigo: true,
           cliente: true,
           direccion: true,
+          estado: true,
         },
       },
       usuarios: {
@@ -123,6 +152,8 @@ export async function findRegistroWithDetails(id: string) {
         select: {
           id: true,
           url: true,
+          public_id: true,
+          formato: true,
           created_at: true,
         },
         orderBy: {
@@ -283,6 +314,8 @@ export async function getIngenieriaRegistros(req: Request, res: Response) {
           select: {
             id: true,
             url: true,
+            public_id: true,
+            formato: true,
             created_at: true,
           },
           orderBy: {
@@ -346,15 +379,16 @@ export async function iniciarRevisionIngenieria(req: Request, res: Response) {
       });
     }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.registros_terreno.update({
-        where: { id: registroId },
+    const transitioned = await prisma.$transaction(async (tx) => {
+      const updated = await tx.registros_terreno.updateMany({
+        where: { id: registroId, estado: EstadoRegistroTerreno.pendiente },
         data: {
           estado: EstadoRegistroTerreno.en_revision,
           devuelto_a_tecnico: false,
           updated_at: new Date(),
         },
       });
+      if (updated.count !== 1) return false;
 
       await tx.procesamiento_ingenieria.upsert({
         where: { registro_terreno_id: registroId },
@@ -367,7 +401,15 @@ export async function iniciarRevisionIngenieria(req: Request, res: Response) {
           procesado_at: new Date(),
         },
       });
+      return true;
     });
+    if (!transitioned) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro cambió de estado mientras se iniciaba la revisión",
+        code: "ESTADO_CONFLICTO",
+      });
+    }
 
     const registro = await findRegistroWithDetails(registroId);
 
@@ -407,6 +449,14 @@ export async function updateRegistroIngenieria(req: Request, res: Response) {
       return res.status(404).json({
         success: false,
         error: "Registro no encontrado",
+      });
+    }
+
+    if (currentRegistro.estado !== EstadoRegistroTerreno.en_revision) {
+      return res.status(409).json({
+        success: false,
+        error: "Solo se puede editar un registro en revisión",
+        code: "REGISTRO_LOCKED",
       });
     }
 
@@ -541,12 +591,64 @@ export async function updateRegistroIngenieria(req: Request, res: Response) {
       data.itemizado_mandante = normalizeText(itemizadoMandanteInput) || null;
     }
 
+    const isJuntaLineal =
+      currentRegistro.tipo_registro === "junta_lineal_espuma";
+    const cantidadSellosFinal =
+      cantidadSellosInput !== undefined
+        ? Math.trunc(Number(cantidadSellosInput))
+        : currentRegistro.cantidad_sellos;
+    const holguraFinal =
+      holgura !== undefined
+        ? Number(holguraParsed ?? currentRegistro.holgura)
+        : Number(currentRegistro.holgura);
+    const accesibilidadFinal =
+      accesibilidad !== undefined
+        ? accesibilidadParsed
+        : currentRegistro.accesibilidad;
+    const aislacionFinal =
+      aislacion !== undefined ? aislacionParsed : currentRegistro.aislacion;
+    const reparacionFinal =
+      reparacionTabiqueInput !== undefined
+        ? reparacionParsed
+        : currentRegistro.reparacion_tabique;
+    const pisoFinal =
+      piso !== undefined
+        ? normalizeText(piso) || currentRegistro.piso
+        : currentRegistro.piso;
+    const calcResult = isJuntaLineal
+      ? null
+      : await calcularCamposConConfiguracion(currentRegistro.obra_id, {
+          cantidad_sellos: cantidadSellosFinal,
+          holgura: holguraFinal,
+          accesibilidad: accesibilidadFinal ?? 1,
+          aislacion: aislacionFinal,
+          reparacion_tabique: reparacionFinal,
+          piso: pisoFinal,
+          tipoRegistro: currentRegistro.tipo_registro,
+        });
+
+    data.factor_por_holguras = calcResult?.factor_por_holguras ?? null;
+    data.cantidad_sellos_con_factores =
+      calcResult?.cantidad_sellos_con_factores ?? null;
+    data.aislacion = calcResult?.aislacion_normalizada ?? null;
+    data.cantidad_sellos_aislacion =
+      calcResult?.cantidad_sellos_aislacion ?? null;
+    data.reparacion_tabique =
+      calcResult?.reparacion_tabique_normalizada ?? null;
+    data.cantidad_final = calcResult?.cantidad_final ?? null;
     data.updated_at = new Date();
 
-    await prisma.registros_terreno.update({
-      where: { id: registroId },
+    const updated = await prisma.registros_terreno.updateMany({
+      where: { id: registroId, estado: EstadoRegistroTerreno.en_revision },
       data,
     });
+    if (updated.count !== 1) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro cambió de estado mientras se actualizaba",
+        code: "ESTADO_CONFLICTO",
+      });
+    }
 
     const registro = await findRegistroWithDetails(registroId);
 
@@ -556,6 +658,13 @@ export async function updateRegistroIngenieria(req: Request, res: Response) {
       message: "Registro actualizado",
     });
   } catch (error) {
+    if (error instanceof Error && error.message === "CORREGIR HOLGURA") {
+      return res.status(400).json({
+        success: false,
+        error: "CORREGIR HOLGURA",
+      });
+    }
+
     console.error("UPDATE REGISTRO INGENIERIA ERROR:", error);
 
     return res.status(500).json({
@@ -597,9 +706,9 @@ export async function validarRegistroIngenieria(req: Request, res: Response) {
       });
     }
 
-    await prisma.$transaction(async (tx) => {
-      await tx.registros_terreno.update({
-        where: { id: registroId },
+    const transitioned = await prisma.$transaction(async (tx) => {
+      const updated = await tx.registros_terreno.updateMany({
+        where: { id: registroId, estado: EstadoRegistroTerreno.en_revision },
         data: {
           estado: EstadoRegistroTerreno.validado,
           motivo_rechazo: null,
@@ -609,6 +718,7 @@ export async function validarRegistroIngenieria(req: Request, res: Response) {
           updated_at: new Date(),
         },
       });
+      if (updated.count !== 1) return false;
 
       await tx.procesamiento_ingenieria.upsert({
         where: { registro_terreno_id: registroId },
@@ -627,7 +737,15 @@ export async function validarRegistroIngenieria(req: Request, res: Response) {
           procesado_at: new Date(),
         },
       });
+      return true;
     });
+    if (!transitioned) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro cambió de estado mientras se validaba",
+        code: "ESTADO_CONFLICTO",
+      });
+    }
 
     const registro = await findRegistroWithDetails(registroId);
 
@@ -687,18 +805,42 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
       });
     }
 
+    const isJuntaLineal =
+      currentRegistro.tipo_registro === "junta_lineal_espuma";
+    const calcResult = isJuntaLineal
+      ? null
+      : await calcularCamposConConfiguracion(currentRegistro.obra_id, {
+          cantidad_sellos: currentRegistro.cantidad_sellos,
+          holgura: Number(currentRegistro.holgura),
+          accesibilidad: currentRegistro.accesibilidad ?? 1,
+          aislacion: currentRegistro.aislacion,
+          reparacion_tabique: currentRegistro.reparacion_tabique,
+          piso: currentRegistro.piso,
+          tipoRegistro: currentRegistro.tipo_registro,
+        });
+
     const result = await prisma.$transaction(async (tx) => {
-      const rechazado = await tx.registros_terreno.update({
-        where: { id: registroId },
+      const rejected = await tx.registros_terreno.updateMany({
+        where: { id: registroId, estado: EstadoRegistroTerreno.en_revision },
         data: {
           estado: EstadoRegistroTerreno.rechazado,
           motivo_rechazo: motivoRechazo,
           fecha_rechazo: new Date(),
           rechazado_por_id: req.user!.id,
           devuelto_a_tecnico: false,
+          factor_por_holguras: calcResult?.factor_por_holguras ?? null,
+          cantidad_sellos_con_factores:
+            calcResult?.cantidad_sellos_con_factores ?? null,
+          aislacion: calcResult?.aislacion_normalizada ?? null,
+          cantidad_sellos_aislacion:
+            calcResult?.cantidad_sellos_aislacion ?? null,
+          reparacion_tabique:
+            calcResult?.reparacion_tabique_normalizada ?? null,
+          cantidad_final: calcResult?.cantidad_final ?? null,
           updated_at: new Date(),
         },
       });
+      if (rejected.count !== 1) return null;
 
       const copia = await tx.registros_terreno.create({
         data: {
@@ -727,15 +869,16 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
           itemizado_mandante: currentRegistro.itemizado_mandante,
           foto_url: currentRegistro.foto_url,
           recinto: currentRegistro.recinto,
-          factor_por_holguras: currentRegistro.factor_por_holguras,
+          factor_por_holguras: calcResult?.factor_por_holguras ?? null,
           accesibilidad: currentRegistro.accesibilidad,
           cantidad_sellos_con_factores:
-            currentRegistro.cantidad_sellos_con_factores,
-          aislacion: currentRegistro.aislacion,
+            calcResult?.cantidad_sellos_con_factores ?? null,
+          aislacion: calcResult?.aislacion_normalizada ?? null,
           cantidad_sellos_aislacion:
-            currentRegistro.cantidad_sellos_aislacion,
-          reparacion_tabique: currentRegistro.reparacion_tabique,
-          cantidad_final: currentRegistro.cantidad_final,
+            calcResult?.cantidad_sellos_aislacion ?? null,
+          reparacion_tabique:
+            calcResult?.reparacion_tabique_normalizada ?? null,
+          cantidad_final: calcResult?.cantidad_final ?? null,
           folio: currentRegistro.folio,
           es_correccion: true,
           registro_origen_id: registroId,
@@ -756,10 +899,17 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
         },
       });
 
-      return { rechazado, copia };
+      return { copia };
     });
+    if (!result) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro cambió de estado mientras se rechazaba",
+        code: "ESTADO_CONFLICTO",
+      });
+    }
 
-    const registro = await findRegistroWithDetails(result.rechazado.id);
+    const registro = await findRegistroWithDetails(registroId);
 
     return res.json({
       success: true,
@@ -770,6 +920,13 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
       message: "Registro rechazado y copia creada para corrección",
     });
   } catch (error) {
+    if (error instanceof Error && error.message === "CORREGIR HOLGURA") {
+      return res.status(400).json({
+        success: false,
+        error: "CORREGIR HOLGURA",
+      });
+    }
+
     console.error("RECHAZAR REGISTRO INGENIERIA ERROR:", error);
 
     return res.status(500).json({
@@ -876,7 +1033,7 @@ export async function getControlInspeccion(req: Request, res: Response) {
       return res.status(404).json({ success: false, error: "Control de inspección no encontrado" });
     }
 
-    return res.json({ success: true, data: control });
+    return res.json({ success: true, data: mapControlPrivatePhotos(control) });
   } catch (error) {
     console.error("GET CONTROL INSPECCION ERROR:", error);
     return res.status(500).json({ success: false, error: "No se pudo obtener el control de inspección" });
@@ -896,24 +1053,62 @@ export async function createControlInspeccion(req: Request, res: Response) {
       return res.status(400).json({ success: false, error: "Falta id del registro" });
     }
 
-    const existing = await prisma.registros_terreno.findUnique({ where: { id: registroId } });
+    const existing = await prisma.registros_terreno.findUnique({
+      where: { id: registroId },
+      include: {
+        controles_inspeccion: {
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
 
     if (!existing) {
       return res.status(404).json({ success: false, error: "Registro no encontrado" });
     }
 
     const { fecha, ensayo, observacion, conformidad, parametros } = req.body ?? {};
+    const parsedFecha = new Date(fecha);
 
-    if (!fecha) {
+    if (!fecha || Number.isNaN(parsedFecha.getTime())) {
       return res.status(400).json({ success: false, error: "La fecha es requerida" });
+    }
+
+    if (
+      !existing.seleccionado_para_inspeccion ||
+      !(new Set<EstadoRegistroTerreno>([
+        EstadoRegistroTerreno.validado,
+        EstadoRegistroTerreno.en_revision,
+      ])).has(existing.estado)
+    ) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro no está habilitado para control de inspección",
+        code: "REGISTRO_NO_HABILITADO",
+      });
+    }
+
+    if (existing.controles_inspeccion.length) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro ya tiene un control de inspección",
+        code: "CONTROL_EXISTENTE",
+      });
     }
 
     if (!ensayo || !normalizeText(ensayo)) {
       return res.status(400).json({ success: false, error: "El ensayo es requerido" });
     }
 
-    if (conformidad && !CONFORMIDAD_VALUES.has(conformidad)) {
-      return res.status(400).json({ success: false, error: "Conformidad no válida" });
+    if (!CONFORMIDAD_VALUES.has(conformidad)) {
+      return res.status(400).json({ success: false, error: "La conformidad es requerida" });
+    }
+
+    if (!Array.isArray(parametros) || parametros.length === 0 || parametros.length > 50) {
+      return res.status(400).json({
+        success: false,
+        error: "Debes informar entre 1 y 50 parámetros de inspección",
+      });
     }
 
     const parsedParametros: {
@@ -947,17 +1142,25 @@ export async function createControlInspeccion(req: Request, res: Response) {
       }
     }
 
-    const [control] = await prisma.$transaction([
-      prisma.controles_inspeccion.create({
+    const tieneNoCumple = parsedParametros.some((p) => p.resultado === "no_cumple");
+    if (
+      (conformidad === "conforme" && tieneNoCumple) ||
+      (conformidad === "no_conforme" && !tieneNoCumple)
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "La conformidad no coincide con el resultado de los parámetros",
+      });
+    }
+
+    const control = await prisma.controles_inspeccion.create({
         data: {
           registro_terreno_id: registroId,
           ingeniero_id: req.user!.id,
-          fecha: new Date(fecha),
+          fecha: parsedFecha,
           ensayo: normalizeText(ensayo),
           observacion: observacion ? normalizeText(observacion) : null,
-          conformidad: conformidad
-            ? (conformidad as EstadoConformidadInspeccion)
-            : null,
+          conformidad: conformidad as EstadoConformidadInspeccion,
           controles_inspeccion_parametros: {
             create: parsedParametros,
           },
@@ -970,26 +1173,7 @@ export async function createControlInspeccion(req: Request, res: Response) {
           usuarios: { select: { id: true, nombre: true, email: true } },
           fotos_control_inspeccion: true,
         },
-      }),
-      prisma.registros_terreno.update({
-        where: { id: registroId },
-        data:
-          conformidad === "no_conforme"
-            ? {
-                inspeccion_estado: "inspeccionado",
-                inspeccion_revision_estado: "rechazado",
-                inspeccion_revision_at: new Date(),
-                inspeccion_revision_por_id: req.user!.id,
-              }
-            : {
-                inspeccion_estado: "inspeccionado",
-                inspeccion_revision_estado: "validado",
-                inspeccion_revision_at: new Date(),
-                inspeccion_revision_por_id: req.user!.id,
-                motivo_rechazo_inspeccion: null,
-              },
-      }),
-    ]);
+      });
 
     return res.status(201).json({ success: true, data: control });
   } catch (error) {
@@ -1031,6 +1215,17 @@ export async function uploadControlInspeccionFotos(req: Request, res: Response) 
       return res.status(404).json({ success: false, error: "Control de inspección no encontrado" });
     }
 
+    const existingPhotoCount = await prisma.fotos_control_inspeccion.count({
+      where: { control_inspeccion_id: controlId },
+    });
+    if (existingPhotoCount > 0) {
+      return res.status(409).json({
+        success: false,
+        error: "El control de inspección ya fue finalizado",
+        code: "CONTROL_FINALIZADO",
+      });
+    }
+
     const registro = control.registros_terreno;
     const folder = buildCloudinaryFolder(
       registro.obras?.codigo || registro.obra_id || "sin-obra",
@@ -1061,9 +1256,17 @@ export async function uploadControlInspeccionFotos(req: Request, res: Response) 
         });
       }
 
-      const fotos = await prisma.$transaction(
-        uploadedResults.map((uploaded) =>
-          prisma.fotos_control_inspeccion.create({
+      const fotos = await prisma.$transaction(async (tx) => {
+        const concurrentPhotoCount = await tx.fotos_control_inspeccion.count({
+          where: { control_inspeccion_id: controlId },
+        });
+        if (concurrentPhotoCount > 0) {
+          throw new Error("CONTROL_FINALIZADO");
+        }
+
+        const createdPhotos = await Promise.all(
+          uploadedResults.map((uploaded) =>
+            tx.fotos_control_inspeccion.create({
             data: {
               control_inspeccion_id: controlId,
               url: uploaded.secure_url,
@@ -1073,16 +1276,64 @@ export async function uploadControlInspeccionFotos(req: Request, res: Response) 
               bytes: uploaded.bytes,
               subido_por_id: userId,
             },
-          })
-        )
-      );
+            }),
+          ),
+        );
 
-      return res.status(201).json({ success: true, data: fotos });
+        const registroUpdated = await tx.registros_terreno.updateMany({
+          where: {
+            id: registroId,
+            seleccionado_para_inspeccion: true,
+            estado: {
+              in: [EstadoRegistroTerreno.validado, EstadoRegistroTerreno.en_revision],
+            },
+          },
+          data:
+            control.conformidad === "no_conforme"
+              ? {
+                  inspeccion_estado: "inspeccionado",
+                  inspeccion_revision_estado: "rechazado",
+                  inspeccion_revision_at: new Date(),
+                  inspeccion_revision_por_id: userId,
+                }
+              : {
+                  inspeccion_estado: "inspeccionado",
+                  inspeccion_revision_estado: "validado",
+                  inspeccion_revision_at: new Date(),
+                  inspeccion_revision_por_id: userId,
+                  motivo_rechazo_inspeccion: null,
+                },
+        });
+        if (registroUpdated.count !== 1) {
+          throw new Error("REGISTRO_NO_HABILITADO");
+        }
+
+        return createdPhotos;
+      });
+
+      return res.status(201).json({
+        success: true,
+        data: fotos.map(withPrivateImageUrl),
+      });
     } catch (uploadError) {
       await Promise.allSettled(
         uploadedResults.map((foto) => deleteImageFromCloudinary(foto.public_id))
       );
 
+      if (uploadError instanceof Error && uploadError.message === "CONTROL_FINALIZADO") {
+        return res.status(409).json({
+          success: false,
+          error: "El control de inspección ya fue finalizado",
+          code: uploadError.message,
+        });
+      }
+      if (uploadError instanceof Error && uploadError.message === "REGISTRO_NO_HABILITADO") {
+        return res.status(409).json({
+          success: false,
+          error: "El registro dejó de estar habilitado para inspección",
+          code: uploadError.message,
+        });
+      }
       throw uploadError;
     }
   } catch (error) {

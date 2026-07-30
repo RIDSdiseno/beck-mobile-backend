@@ -3,6 +3,33 @@ import fs from "fs";
 import path from "path";
 import PDFDocument from "pdfkit";
 import { findRegistroWithDetails } from "./ingenieria.controller";
+import { getPrivateDownloadUrl } from "../services/cloudinary.service";
+import { prisma } from "../config/prisma";
+
+async function canDownloadRegistroPdf(
+  userId: string,
+  role: string,
+  registro: { usuario_id: string; obra_id: string; obras?: { estado?: string } | null },
+) {
+  if (role === "administrador" || role === "ingenieria") return true;
+  if (role === "terreno") return registro.usuario_id === userId;
+  if (role === "jefeobra") {
+    return registro.obras?.estado === "activa" || registro.obras?.estado === "pausada";
+  }
+  if (role === "cliente") {
+    const assignment = await prisma.usuarios_obras.findUnique({
+      where: {
+        usuario_id_obra_id: {
+          usuario_id: userId,
+          obra_id: registro.obra_id,
+        },
+      },
+      select: { id: true },
+    });
+    return Boolean(assignment);
+  }
+  return false;
+}
 
 // ── Constantes de layout ────────────────────────────────────────────────────────
 
@@ -226,7 +253,16 @@ export async function generateRegistroPdfBuffer(
 ): Promise<Buffer> {
   const fotoUrls: string[] =
     registro.fotos && registro.fotos.length > 0
-      ? registro.fotos.map((f: any) => f.url)
+      ? registro.fotos.map((foto: any) =>
+          foto.public_id
+            ? getPrivateDownloadUrl(
+                foto.public_id,
+                foto.formato || "jpg",
+                "image",
+                10 * 60,
+              )
+            : foto.url,
+        )
       : (Array.isArray(registro.fotos_urls) ? registro.fotos_urls : []);
 
   const imageBuffers = await Promise.all(fotoUrls.map(fetchImageBuffer));
@@ -349,11 +385,23 @@ export async function generateRegistroPdfBuffer(
 export async function descargarRegistroPdf(req: Request, res: Response): Promise<void> {
   try {
     const id = req.params.id as string;
+    const userId = req.user?.id;
+    const role = req.user?.rol;
+
+    if (!userId || !role) {
+      res.status(401).json({ success: false, error: "Usuario no autenticado" });
+      return;
+    }
 
     const registro = await findRegistroWithDetails(id);
 
     if (!registro) {
       res.status(404).json({ success: false, error: "Registro no encontrado" });
+      return;
+    }
+
+    if (!(await canDownloadRegistroPdf(userId, role, registro))) {
+      res.status(403).json({ success: false, error: "No tienes acceso a este PDF" });
       return;
     }
 
@@ -363,16 +411,17 @@ export async function descargarRegistroPdf(req: Request, res: Response): Promise
     }
 
     const codigoRegistro = registro.codigo_beck ?? `REG-${registro.id.slice(0, 6).toUpperCase()}`;
+    const safeFilename = codigoRegistro.replace(/[^a-zA-Z0-9_-]/g, "_");
 
     if (registro.pdf_firmado_url) {
-      res.redirect(registro.pdf_firmado_url);
+      res.redirect(getPrivateDownloadUrl(registro.pdf_firmado_url, "pdf", "raw"));
       return;
     }
 
     const pdfBuffer = await generateRegistroPdfBuffer(registro);
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", `attachment; filename="${codigoRegistro}.pdf"`);
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename}.pdf"`);
     res.send(pdfBuffer);
   } catch (error) {
     console.error("Error al generar PDF de registro:", error);

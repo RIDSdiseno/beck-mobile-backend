@@ -21,50 +21,39 @@ async function getMicrosoftJwtVerifier() {
   return { jwtVerify, jwks };
 }
 
-function decodeName(payload: any): string {
-  return (
-    payload.name ||
-    payload.preferred_username ||
-    payload.email ||
-    "Usuario Microsoft"
-  );
-}
-
-function decodeEmail(payload: any): string {
-  return String(
-    payload.preferred_username || payload.email || payload.upn || ""
-  )
-    .toLowerCase()
-    .trim();
+function stringClaim(payload: Record<string, unknown>, key: string): string {
+  const value = payload[key];
+  return typeof value === "string" ? value.trim() : "";
 }
 
 export async function verifyMicrosoftIdToken(
   idToken: string
 ): Promise<MicrosoftUserClaims> {
-  const { jwtVerify, jwks } = await getMicrosoftJwtVerifier();
-
-  const verified = await jwtVerify(idToken, jwks, {
+  const verifier = await getMicrosoftJwtVerifier();
+  const verified = await verifier.jwtVerify(idToken, verifier.jwks, {
     issuer,
     audience: env.azureClientId,
   });
+  const payload = verified.payload;
+  const email = (
+    stringClaim(payload, "preferred_username") ||
+    stringClaim(payload, "email") ||
+    stringClaim(payload, "upn")
+  ).toLowerCase();
+  const oid = stringClaim(payload, "oid") || stringClaim(payload, "sub");
+  const name =
+    stringClaim(payload, "name") ||
+    stringClaim(payload, "preferred_username") ||
+    email ||
+    "Usuario Microsoft";
 
-  const payloadJwt = verified.payload as any;
-
-  const email = decodeEmail(payloadJwt);
-  const oid = String(payloadJwt.oid || payloadJwt.sub || "").trim();
-  const name = decodeName(payloadJwt);
-
-  if (!email) {
+  if (!email || !email.includes("@")) {
     throw new Error("Microsoft no devolvió un email válido");
   }
 
   if (!oid) {
-    throw new Error("Microsoft no devolvió un oid válido");
+    throw new Error("Microsoft no devolvió un identificador válido");
   }
 
-  return {
-    oid,
-    email,
-    name,
-  };
+  return { oid, email, name };
 }

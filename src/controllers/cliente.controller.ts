@@ -1,6 +1,11 @@
 import { Request, Response } from "express";
 import { prisma } from "../config/prisma";
-import { uploadBufferToCloudinary, uploadRawBufferToCloudinary } from "../services/cloudinary.service";
+import {
+  deleteRawFromCloudinary,
+  getPrivateDownloadUrl,
+  uploadRawBufferToCloudinary,
+  withPrivateImageUrl,
+} from "../services/cloudinary.service";
 import { findRegistroWithDetails } from "./ingenieria.controller";
 import { generateRegistroPdfBuffer } from "./registroPdf.controller";
 
@@ -43,26 +48,48 @@ function normalizeFotos(registro: {
   id: string;
   foto_url?: string | null;
   fotos_urls?: string[] | null;
-  fotos?: { id: string; url: string; created_at: Date; nombre_archivo?: string | null }[];
+  fotos?: {
+    id: string;
+    url: string;
+    public_id: string;
+    formato?: string | null;
+    created_at: Date;
+    nombre_archivo?: string | null;
+  }[];
 }) {
   const seen = new Set<string>();
+  const relationFotos = registro.fotos || [];
+  const legacyFotos = relationFotos.length
+    ? []
+    : [
+        ...(Array.isArray(registro.fotos_urls) ? registro.fotos_urls : []).map(
+          (url, index) => ({
+            id: `${registro.id}-url-${index}`,
+            url,
+            nombre: null,
+            created_at: new Date(0),
+          }),
+        ),
+        ...(registro.foto_url
+          ? [
+              {
+                id: `${registro.id}-foto-url`,
+                url: registro.foto_url,
+                nombre: null,
+                created_at: new Date(0),
+              },
+            ]
+          : []),
+      ];
 
   return [
-    ...(registro.fotos || []).map((foto) => ({
+    ...relationFotos.map((foto) => ({
       id: foto.id,
-      url: foto.url,
+      url: withPrivateImageUrl(foto).url,
       nombre: foto.nombre_archivo || null,
       created_at: foto.created_at,
     })),
-    ...(Array.isArray(registro.fotos_urls) ? registro.fotos_urls : []).map((url, index) => ({
-      id: `${registro.id}-url-${index}`,
-      url,
-      nombre: null,
-      created_at: new Date(0),
-    })),
-    ...(registro.foto_url
-      ? [{ id: `${registro.id}-foto-url`, url: registro.foto_url, nombre: null, created_at: new Date(0) }]
-      : []),
+    ...legacyFotos,
   ].filter((foto) => {
     if (!foto.url || seen.has(foto.url)) return false;
     seen.add(foto.url);
@@ -118,7 +145,7 @@ function normalizeRegistroCliente(registro: any) {
     validadoCliente:           registro.validado_cliente ?? false,
     validadoClienteAt:         registro.validado_cliente_at  ?? null,
     firmaClienteUrl:           registro.firma_cliente_url    ?? null,
-    pdfFirmadoUrl:             registro.pdf_firmado_url      ?? null,
+    pdfDisponible:             Boolean(registro.pdf_firmado_url),
     // Info de obra (disponible en historial)
     obraNombre:                registro.obras?.nombre  ?? null,
     obraCodigo:                registro.obras?.codigo  ?? null,
@@ -221,7 +248,14 @@ const REGISTRO_SELECT = {
   firma_cliente_url:            true,
   pdf_firmado_url:              true,
   fotos: {
-    select: { id: true, url: true, nombre_archivo: true, created_at: true },
+    select: {
+      id: true,
+      url: true,
+      public_id: true,
+      formato: true,
+      nombre_archivo: true,
+      created_at: true,
+    },
     orderBy: { created_at: "desc" as const },
   },
 } as const;
@@ -370,22 +404,41 @@ export async function validarRegistroCliente(req: Request, res: Response) {
     });
 
     const codigoBeck = registroBase.codigo_beck ?? `REG-${id.slice(0, 6).toUpperCase()}`;
+    const safeCodigoBeck = codigoBeck.replace(/[^a-zA-Z0-9_-]/g, "_");
 
     // Subir PDF firmado a Cloudinary como raw
     const pdfResult = await uploadRawBufferToCloudinary(pdfBuffer, {
       folder:   "beck/pdfs-firmados",
-      publicId: `${codigoBeck}-firmado-${id.slice(0, 8)}`,
+      publicId: `${safeCodigoBeck}-firmado-${id}.pdf`,
     });
 
-    // Guardar URL del PDF firmado y marcar como validado
-    const updated = await prisma.registros_terreno.update({
-      where: { id },
+    const updateResult = await prisma.registros_terreno.updateMany({
+      where: {
+        id,
+        estado: "validado",
+        validado_cliente: false,
+      },
       data: {
         validado_cliente:        true,
         validado_cliente_at:     firmadoAt,
         validado_cliente_por_id: session.userId,
-        pdf_firmado_url:         pdfResult.secure_url,
+        // Se conserva la columna por compatibilidad, pero ahora almacena el
+        // public_id privado y nunca una URL pública.
+        pdf_firmado_url:         pdfResult.public_id,
       },
+    });
+
+    if (updateResult.count !== 1) {
+      await deleteRawFromCloudinary(pdfResult.public_id);
+      return res.status(409).json({
+        success: false,
+        error: "Este registro ya fue validado por otro proceso",
+        code: "REGISTRO_ALREADY_SIGNED",
+      });
+    }
+
+    const updated = await prisma.registros_terreno.findUniqueOrThrow({
+      where: { id },
       select: {
         ...REGISTRO_SELECT,
         obras: { select: { nombre: true, codigo: true } },
@@ -396,6 +449,45 @@ export async function validarRegistroCliente(req: Request, res: Response) {
   } catch (error) {
     console.error("VALIDAR REGISTRO CLIENTE ERROR:", error);
     return res.status(500).json({ success: false, error: "No se pudo validar el registro" });
+  }
+}
+
+export async function descargarPdfCliente(req: Request, res: Response) {
+  try {
+    const session = requireCliente(req, res);
+    if (!session) return;
+
+    const id = typeof req.params.id === "string" ? req.params.id : "";
+    if (!id) {
+      return res.status(400).json({ success: false, error: "Falta id del registro" });
+    }
+
+    const obraIds = await getObraIdsCliente(session.userId, session.userRole);
+    const registro = await prisma.registros_terreno.findUnique({
+      where: { id },
+      select: {
+        obra_id: true,
+        validado_cliente: true,
+        pdf_firmado_url: true,
+      },
+    });
+
+    if (!registro) {
+      return res.status(404).json({ success: false, error: "Registro no encontrado" });
+    }
+    if (!obraIds.includes(registro.obra_id)) {
+      return res.status(403).json({ success: false, error: "No tienes acceso a este registro" });
+    }
+    if (!registro.validado_cliente || !registro.pdf_firmado_url) {
+      return res.status(404).json({ success: false, error: "PDF firmado no disponible" });
+    }
+
+    return res.redirect(
+      getPrivateDownloadUrl(registro.pdf_firmado_url, "pdf", "raw"),
+    );
+  } catch (error) {
+    console.error("DESCARGAR PDF CLIENTE ERROR:", error);
+    return res.status(500).json({ success: false, error: "No se pudo descargar el PDF" });
   }
 }
 

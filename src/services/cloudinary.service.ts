@@ -19,6 +19,7 @@ export function uploadBufferToCloudinary(
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         resource_type: "image",
+        type: "authenticated",
         folder: options?.folder,
         public_id: options?.publicId,
       },
@@ -44,6 +45,7 @@ export function uploadRawBufferToCloudinary(
     const uploadStream = cloudinary.uploader.upload_stream(
       {
         resource_type: "raw",
+        type: "authenticated",
         folder: options?.folder,
         public_id: options?.publicId,
       },
@@ -60,5 +62,43 @@ export function uploadRawBufferToCloudinary(
 export function deleteImageFromCloudinary(publicId: string) {
   return cloudinary.uploader.destroy(publicId, {
     resource_type: "image",
+    type: "authenticated",
   });
+}
+
+export function deleteRawFromCloudinary(publicId: string) {
+  return cloudinary.uploader.destroy(publicId, {
+    resource_type: "raw",
+    type: "authenticated",
+  });
+}
+
+export function getPrivateDownloadUrl(
+  publicId: string,
+  format: string,
+  resourceType: "image" | "raw" = "image",
+  expiresInSeconds = 5 * 60,
+) {
+  return cloudinary.utils.private_download_url(publicId, format, {
+    resource_type: resourceType,
+    type: "authenticated",
+    expires_at: Math.floor(Date.now() / 1000) + expiresInSeconds,
+    attachment: resourceType === "raw",
+  });
+}
+
+export function withPrivateImageUrl<T extends {
+  public_id: string;
+  formato?: string | null;
+  url?: string;
+}>(photo: T, expiresInSeconds = 30 * 60) {
+  return {
+    ...photo,
+    url: getPrivateDownloadUrl(
+      photo.public_id,
+      photo.formato || "jpg",
+      "image",
+      expiresInSeconds,
+    ),
+  };
 }
