@@ -21,7 +21,8 @@ const pool =
     connectionString,
     ssl: env.databaseSsl
       ? {
-          rejectUnauthorized: process.env.DATABASE_SSL_REJECT_UNAUTHORIZED !== "false",
+          rejectUnauthorized:
+            process.env.DATABASE_SSL_REJECT_UNAUTHORIZED === "true",
         }
       : undefined,
     max: Number(process.env.DATABASE_POOL_MAX || 10),
