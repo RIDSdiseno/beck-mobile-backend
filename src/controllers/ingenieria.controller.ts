@@ -11,6 +11,7 @@ import {
   uploadBufferToCloudinary,
   withPrivateImageUrl,
 } from "../services/cloudinary.service";
+import { calcularCamposConConfiguracion } from "../services/calculosRegistroTerreno.service";
 import { buildCloudinaryFolder } from "./registros.controller";
 
 const MIN_CONTROL_INSPECCION_FOTOS = 1;
@@ -590,6 +591,51 @@ export async function updateRegistroIngenieria(req: Request, res: Response) {
       data.itemizado_mandante = normalizeText(itemizadoMandanteInput) || null;
     }
 
+    const isJuntaLineal =
+      currentRegistro.tipo_registro === "junta_lineal_espuma";
+    const cantidadSellosFinal =
+      cantidadSellosInput !== undefined
+        ? Math.trunc(Number(cantidadSellosInput))
+        : currentRegistro.cantidad_sellos;
+    const holguraFinal =
+      holgura !== undefined
+        ? Number(holguraParsed ?? currentRegistro.holgura)
+        : Number(currentRegistro.holgura);
+    const accesibilidadFinal =
+      accesibilidad !== undefined
+        ? accesibilidadParsed
+        : currentRegistro.accesibilidad;
+    const aislacionFinal =
+      aislacion !== undefined ? aislacionParsed : currentRegistro.aislacion;
+    const reparacionFinal =
+      reparacionTabiqueInput !== undefined
+        ? reparacionParsed
+        : currentRegistro.reparacion_tabique;
+    const pisoFinal =
+      piso !== undefined
+        ? normalizeText(piso) || currentRegistro.piso
+        : currentRegistro.piso;
+    const calcResult = isJuntaLineal
+      ? null
+      : await calcularCamposConConfiguracion(currentRegistro.obra_id, {
+          cantidad_sellos: cantidadSellosFinal,
+          holgura: holguraFinal,
+          accesibilidad: accesibilidadFinal ?? 1,
+          aislacion: aislacionFinal,
+          reparacion_tabique: reparacionFinal,
+          piso: pisoFinal,
+          tipoRegistro: currentRegistro.tipo_registro,
+        });
+
+    data.factor_por_holguras = calcResult?.factor_por_holguras ?? null;
+    data.cantidad_sellos_con_factores =
+      calcResult?.cantidad_sellos_con_factores ?? null;
+    data.aislacion = calcResult?.aislacion_normalizada ?? null;
+    data.cantidad_sellos_aislacion =
+      calcResult?.cantidad_sellos_aislacion ?? null;
+    data.reparacion_tabique =
+      calcResult?.reparacion_tabique_normalizada ?? null;
+    data.cantidad_final = calcResult?.cantidad_final ?? null;
     data.updated_at = new Date();
 
     const updated = await prisma.registros_terreno.updateMany({
@@ -612,6 +658,13 @@ export async function updateRegistroIngenieria(req: Request, res: Response) {
       message: "Registro actualizado",
     });
   } catch (error) {
+    if (error instanceof Error && error.message === "CORREGIR HOLGURA") {
+      return res.status(400).json({
+        success: false,
+        error: "CORREGIR HOLGURA",
+      });
+    }
+
     console.error("UPDATE REGISTRO INGENIERIA ERROR:", error);
 
     return res.status(500).json({
@@ -752,6 +805,20 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
       });
     }
 
+    const isJuntaLineal =
+      currentRegistro.tipo_registro === "junta_lineal_espuma";
+    const calcResult = isJuntaLineal
+      ? null
+      : await calcularCamposConConfiguracion(currentRegistro.obra_id, {
+          cantidad_sellos: currentRegistro.cantidad_sellos,
+          holgura: Number(currentRegistro.holgura),
+          accesibilidad: currentRegistro.accesibilidad ?? 1,
+          aislacion: currentRegistro.aislacion,
+          reparacion_tabique: currentRegistro.reparacion_tabique,
+          piso: currentRegistro.piso,
+          tipoRegistro: currentRegistro.tipo_registro,
+        });
+
     const result = await prisma.$transaction(async (tx) => {
       const rejected = await tx.registros_terreno.updateMany({
         where: { id: registroId, estado: EstadoRegistroTerreno.en_revision },
@@ -761,6 +828,15 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
           fecha_rechazo: new Date(),
           rechazado_por_id: req.user!.id,
           devuelto_a_tecnico: false,
+          factor_por_holguras: calcResult?.factor_por_holguras ?? null,
+          cantidad_sellos_con_factores:
+            calcResult?.cantidad_sellos_con_factores ?? null,
+          aislacion: calcResult?.aislacion_normalizada ?? null,
+          cantidad_sellos_aislacion:
+            calcResult?.cantidad_sellos_aislacion ?? null,
+          reparacion_tabique:
+            calcResult?.reparacion_tabique_normalizada ?? null,
+          cantidad_final: calcResult?.cantidad_final ?? null,
           updated_at: new Date(),
         },
       });
@@ -793,15 +869,16 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
           itemizado_mandante: currentRegistro.itemizado_mandante,
           foto_url: currentRegistro.foto_url,
           recinto: currentRegistro.recinto,
-          factor_por_holguras: currentRegistro.factor_por_holguras,
+          factor_por_holguras: calcResult?.factor_por_holguras ?? null,
           accesibilidad: currentRegistro.accesibilidad,
           cantidad_sellos_con_factores:
-            currentRegistro.cantidad_sellos_con_factores,
-          aislacion: currentRegistro.aislacion,
+            calcResult?.cantidad_sellos_con_factores ?? null,
+          aislacion: calcResult?.aislacion_normalizada ?? null,
           cantidad_sellos_aislacion:
-            currentRegistro.cantidad_sellos_aislacion,
-          reparacion_tabique: currentRegistro.reparacion_tabique,
-          cantidad_final: currentRegistro.cantidad_final,
+            calcResult?.cantidad_sellos_aislacion ?? null,
+          reparacion_tabique:
+            calcResult?.reparacion_tabique_normalizada ?? null,
+          cantidad_final: calcResult?.cantidad_final ?? null,
           folio: currentRegistro.folio,
           es_correccion: true,
           registro_origen_id: registroId,
@@ -843,6 +920,13 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
       message: "Registro rechazado y copia creada para corrección",
     });
   } catch (error) {
+    if (error instanceof Error && error.message === "CORREGIR HOLGURA") {
+      return res.status(400).json({
+        success: false,
+        error: "CORREGIR HOLGURA",
+      });
+    }
+
     console.error("RECHAZAR REGISTRO INGENIERIA ERROR:", error);
 
     return res.status(500).json({

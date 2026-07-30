@@ -6,6 +6,7 @@ import {
   uploadBufferToCloudinary,
   withPrivateImageUrl,
 } from "../services/cloudinary.service";
+import { calcularCamposConConfiguracion } from "../services/calculosRegistroTerreno.service";
 import { canAccessObra } from "../services/obras.service";
 
 function getDiaSemana(fecha: Date) {
@@ -154,7 +155,6 @@ export async function createRegistro(req: Request, res: Response) {
       cantidadSellos,
       nombreSellador,
       holgura,
-      factorHolguras,
       accesibilidad,
       cieloModular,
       aislacion,
@@ -227,9 +227,6 @@ export async function createRegistro(req: Request, res: Response) {
     const holguraParsed = isJuntaLineal
       ? { value: 0, error: null }
       : parseNonNegativeNumber(holgura, "holgura");
-    const factorHolgurasParsed = isJuntaLineal
-      ? { value: null, error: null }
-      : parseOptionalNonNegativeNumber(factorHolguras ?? holgura, "factorHolguras");
     const accesibilidadInput = accesibilidad ?? cieloModular;
     const accesibilidadParsed = isJuntaLineal
       ? { value: null, error: null }
@@ -246,7 +243,6 @@ export async function createRegistro(req: Request, res: Response) {
     const numericErrors = [
       cantidadSellosParsed.error,
       holguraParsed.error,
-      factorHolgurasParsed.error,
       accesibilidadParsed.error,
       metrosLinealesParsed.error,
       aislacionParsed.error,
@@ -284,6 +280,18 @@ export async function createRegistro(req: Request, res: Response) {
       });
     }
 
+    const calcResult = isJuntaLineal
+      ? null
+      : await calcularCamposConConfiguracion(obra.id, {
+          cantidad_sellos: cantidadSellosParsed.value!,
+          holgura: holguraParsed.value!,
+          accesibilidad: accesibilidadParsed.value ?? 1,
+          aislacion: aislacionParsed.value,
+          reparacion_tabique: reparacionTabiqueParsed.value,
+          piso: normalizeText(piso),
+          tipoRegistro: normalizedTipoRegistro,
+        });
+
     const registro = await prisma.registros_terreno.create({
       data: {
         obra_id: obra.id,
@@ -303,17 +311,19 @@ export async function createRegistro(req: Request, res: Response) {
         cantidad_sellos: cantidadSellosParsed.value!,
         nombre_sellador: normalizeText(nombreSellador),
         holgura: holguraParsed.value!,
-        factor_por_holguras: factorHolgurasParsed.value,
+        factor_por_holguras: calcResult?.factor_por_holguras ?? null,
         accesibilidad:
           !isJuntaLineal && accesibilidadInput !== undefined
             ? accesibilidadParsed.value
             : null,
         cantidad_sellos_con_factores:
-          !isJuntaLineal && factorHolgurasParsed.value !== null
-            ? cantidadSellosParsed.value! * factorHolgurasParsed.value
-            : null,
-        aislacion: aislacionParsed.value,
-        reparacion_tabique: reparacionTabiqueParsed.value,
+          calcResult?.cantidad_sellos_con_factores ?? null,
+        aislacion: calcResult?.aislacion_normalizada ?? null,
+        cantidad_sellos_aislacion:
+          calcResult?.cantidad_sellos_aislacion ?? null,
+        reparacion_tabique:
+          calcResult?.reparacion_tabique_normalizada ?? null,
+        cantidad_final: calcResult?.cantidad_final ?? null,
         observaciones: normalizeText(observaciones) || null,
         fotos_urls: [],
         estado: "pendiente",
@@ -332,6 +342,13 @@ export async function createRegistro(req: Request, res: Response) {
       message: "Registro creado correctamente",
     });
   } catch (error) {
+    if (error instanceof Error && error.message === "CORREGIR HOLGURA") {
+      return res.status(400).json({
+        success: false,
+        error: "CORREGIR HOLGURA",
+      });
+    }
+
     console.error("CREATE REGISTRO ERROR:", error);
 
     return res.status(500).json({
@@ -623,7 +640,6 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
       cantidadSellos,
       nombreSellador,
       holgura,
-      factorHolguras,
       accesibilidad,
       cieloModular,
       aislacion,
@@ -663,9 +679,6 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
     const holguraParsed = isJuntaLineal
       ? { value: 0, error: null }
       : parseNonNegativeNumber(holgura ?? currentRegistro.holgura, "holgura");
-    const factorHolgurasParsed = isJuntaLineal
-      ? { value: null, error: null }
-      : parseOptionalNonNegativeNumber(factorHolguras, "factorHolguras");
     const accesibilidadInput = accesibilidad ?? cieloModular;
     const accesibilidadParsed = isJuntaLineal
       ? { value: null, error: null }
@@ -685,7 +698,6 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
     const numericErrors = [
       cantidadSellosParsed.error,
       holguraParsed.error,
-      factorHolgurasParsed.error,
       accesibilidadParsed.error,
       metrosLinealesParsed.error,
       aislacionParsed.error,
@@ -698,6 +710,34 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
         error: numericErrors.join(". "),
       });
     }
+
+    const pisoFinal = normalizeText(piso) || currentRegistro.piso;
+    const accesibilidadFinal = isJuntaLineal
+      ? null
+      : accesibilidadInput !== undefined
+        ? accesibilidadParsed.value
+        : currentRegistro.accesibilidad;
+    const aislacionFinal = isJuntaLineal
+      ? null
+      : aislacion !== undefined
+        ? aislacionParsed.value
+        : currentRegistro.aislacion;
+    const reparacionFinal = isJuntaLineal
+      ? null
+      : reparacionTabique !== undefined
+        ? reparacionTabiqueParsed.value
+        : currentRegistro.reparacion_tabique;
+    const calcResult = isJuntaLineal
+      ? null
+      : await calcularCamposConConfiguracion(currentRegistro.obra_id, {
+          cantidad_sellos: cantidadSellosParsed.value!,
+          holgura: holguraParsed.value!,
+          accesibilidad: accesibilidadFinal ?? 1,
+          aislacion: aislacionFinal,
+          reparacion_tabique: reparacionFinal,
+          piso: pisoFinal,
+          tipoRegistro: normalizedTipoRegistro,
+        });
 
     const transition = await prisma.registros_terreno.updateMany({
       where: {
@@ -724,7 +764,7 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
           normalizeText(moduloEdificio) || normalizeText(modulo) || currentRegistro.modulo,
         recinto:
           normalizeText(recinto) || currentRegistro.recinto || currentRegistro.modulo,
-        piso: normalizeText(piso) || currentRegistro.piso,
+        piso: pisoFinal,
         eje_numerico: normalizeText(ejeNumerico) || currentRegistro.eje_numerico,
         eje_alfabetico: normalizeText(ejeAlfabetico) || currentRegistro.eje_alfabetico,
         numero_sello: isJuntaLineal
@@ -733,35 +773,16 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
         cantidad_sellos: cantidadSellosParsed.value!,
         nombre_sellador: normalizeText(nombreSellador) || currentRegistro.nombre_sellador,
         holgura: holguraParsed.value!,
-        factor_por_holguras: isJuntaLineal
-          ? null
-          : factorHolguras !== undefined
-            ? factorHolgurasParsed.value
-            : currentRegistro.factor_por_holguras,
-        accesibilidad:
-          isJuntaLineal
-            ? null
-            : accesibilidadInput !== undefined
-              ? accesibilidadParsed.value
-              : currentRegistro.accesibilidad,
+        factor_por_holguras: calcResult?.factor_por_holguras ?? null,
+        accesibilidad: accesibilidadFinal,
         cantidad_sellos_con_factores:
-          isJuntaLineal
-            ? null
-            : factorHolguras !== undefined && factorHolgurasParsed.value !== null
-              ? cantidadSellosParsed.value! * factorHolgurasParsed.value
-              : currentRegistro.cantidad_sellos_con_factores,
-        aislacion:
-          isJuntaLineal
-            ? null
-            : aislacion !== undefined
-              ? aislacionParsed.value
-              : currentRegistro.aislacion,
+          calcResult?.cantidad_sellos_con_factores ?? null,
+        aislacion: calcResult?.aislacion_normalizada ?? null,
+        cantidad_sellos_aislacion:
+          calcResult?.cantidad_sellos_aislacion ?? null,
         reparacion_tabique:
-          isJuntaLineal
-            ? null
-            : reparacionTabique !== undefined
-              ? reparacionTabiqueParsed.value
-              : currentRegistro.reparacion_tabique,
+          calcResult?.reparacion_tabique_normalizada ?? null,
+        cantidad_final: calcResult?.cantidad_final ?? null,
         observaciones: normalizeText(observaciones) || null,
         itemizado_mandante: isJuntaLineal
           ? null
@@ -790,6 +811,13 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
       message: "Registro corregido y enviado al jefe de obra",
     });
   } catch (error) {
+    if (error instanceof Error && error.message === "CORREGIR HOLGURA") {
+      return res.status(400).json({
+        success: false,
+        error: "CORREGIR HOLGURA",
+      });
+    }
+
     console.error("UPDATE REGISTRO TECNICO ERROR:", error);
 
     return res.status(500).json({
@@ -1046,7 +1074,6 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
       cantidadSellos,
       nombreSellador,
       holgura,
-      factorHolguras,
       accesibilidad,
       cieloModular,
       aislacion,
@@ -1093,9 +1120,6 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
     const holguraParsed = isJuntaLineal
       ? { value: 0, error: null }
       : parseNonNegativeNumber(holgura ?? currentRegistro.holgura, "holgura");
-    const factorHolgurasParsed = isJuntaLineal
-      ? { value: null, error: null }
-      : parseOptionalNonNegativeNumber(factorHolguras, "factorHolguras");
     const accesibilidadInput = accesibilidad ?? cieloModular;
     const accesibilidadParsed = isJuntaLineal
       ? { value: null, error: null }
@@ -1118,7 +1142,6 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
     const numericErrors = [
       cantidadSellosParsed.error,
       holguraParsed.error,
-      factorHolgurasParsed.error,
       accesibilidadParsed.error,
       metrosLinealesParsed.error,
       aislacionParsed.error,
@@ -1131,6 +1154,34 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
         error: numericErrors.join(". "),
       });
     }
+
+    const pisoFinal = normalizeText(piso) || currentRegistro.piso;
+    const accesibilidadFinal = isJuntaLineal
+      ? null
+      : accesibilidadInput !== undefined
+        ? accesibilidadParsed.value
+        : currentRegistro.accesibilidad;
+    const aislacionFinal = isJuntaLineal
+      ? null
+      : aislacion !== undefined
+        ? aislacionParsed.value
+        : currentRegistro.aislacion;
+    const reparacionFinal = isJuntaLineal
+      ? null
+      : reparacionTabique !== undefined
+        ? reparacionTabiqueParsed.value
+        : currentRegistro.reparacion_tabique;
+    const calcResult = isJuntaLineal
+      ? null
+      : await calcularCamposConConfiguracion(currentRegistro.obra_id, {
+          cantidad_sellos: cantidadSellosParsed.value!,
+          holgura: holguraParsed.value!,
+          accesibilidad: accesibilidadFinal ?? 1,
+          aislacion: aislacionFinal,
+          reparacion_tabique: reparacionFinal,
+          piso: pisoFinal,
+          tipoRegistro: normalizedTipoRegistro,
+        });
 
     const transition = await prisma.registros_terreno.updateMany({
       where: { id: registroId, estado: EstadoRegistroTerreno.pendiente },
@@ -1153,7 +1204,7 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
           normalizeText(moduloEdificio) || normalizeText(modulo) || currentRegistro.modulo,
         recinto:
           normalizeText(recinto) || currentRegistro.recinto || currentRegistro.modulo,
-        piso: normalizeText(piso) || currentRegistro.piso,
+        piso: pisoFinal,
         eje_numerico: normalizeText(ejeNumerico) || currentRegistro.eje_numerico,
         eje_alfabetico: normalizeText(ejeAlfabetico) || currentRegistro.eje_alfabetico,
         numero_sello: isJuntaLineal
@@ -1162,35 +1213,16 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
         cantidad_sellos: cantidadSellosParsed.value!,
         nombre_sellador: normalizeText(nombreSellador) || currentRegistro.nombre_sellador,
         holgura: holguraParsed.value!,
-        factor_por_holguras: isJuntaLineal
-          ? null
-          : factorHolguras !== undefined
-            ? factorHolgurasParsed.value
-            : currentRegistro.factor_por_holguras,
-        accesibilidad:
-          isJuntaLineal
-            ? null
-            : accesibilidadInput !== undefined
-              ? accesibilidadParsed.value
-              : currentRegistro.accesibilidad,
+        factor_por_holguras: calcResult?.factor_por_holguras ?? null,
+        accesibilidad: accesibilidadFinal,
         cantidad_sellos_con_factores:
-          isJuntaLineal
-            ? null
-            : factorHolguras !== undefined && factorHolgurasParsed.value !== null
-              ? cantidadSellosParsed.value! * factorHolgurasParsed.value
-              : currentRegistro.cantidad_sellos_con_factores,
-        aislacion:
-          isJuntaLineal
-            ? null
-            : aislacion !== undefined
-              ? aislacionParsed.value
-              : currentRegistro.aislacion,
+          calcResult?.cantidad_sellos_con_factores ?? null,
+        aislacion: calcResult?.aislacion_normalizada ?? null,
+        cantidad_sellos_aislacion:
+          calcResult?.cantidad_sellos_aislacion ?? null,
         reparacion_tabique:
-          isJuntaLineal
-            ? null
-            : reparacionTabique !== undefined
-              ? reparacionTabiqueParsed.value
-              : currentRegistro.reparacion_tabique,
+          calcResult?.reparacion_tabique_normalizada ?? null,
+        cantidad_final: calcResult?.cantidad_final ?? null,
         folio: folio !== undefined ? normalizeText(folio) || null : currentRegistro.folio,
         observaciones: normalizeText(observaciones) || null,
         itemizado_mandante: isJuntaLineal
@@ -1225,6 +1257,13 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
       message: "Registro enviado a ingeniería",
     });
   } catch (error) {
+    if (error instanceof Error && error.message === "CORREGIR HOLGURA") {
+      return res.status(400).json({
+        success: false,
+        error: "CORREGIR HOLGURA",
+      });
+    }
+
     console.error("UPDATE REGISTRO JEFE OBRA ERROR:", error);
 
     return res.status(500).json({

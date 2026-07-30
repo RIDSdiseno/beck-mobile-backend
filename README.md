@@ -242,6 +242,12 @@ El middleware `verifyAppToken` decodifica el token y adjunta el payload a `req.u
 | `PUT` | `/:id/observaciones` | Actualiza observaciones de un registro |
 | `POST` | `/:id/fotos` | Sube fotografías (multipart `fotos[]`, máx. 10 archivos × 12 MB) |
 
+Los campos `factor_por_holguras`, `cantidad_sellos_con_factores`, `aislacion`,
+`cantidad_sellos_aislacion`, `reparacion_tabique` y `cantidad_final` son
+autoritativos del backend. Se recalculan juntos a partir de los datos base y de
+los tramos de holgura configurados para la obra; cualquier derivado enviado por
+el cliente se ignora.
+
 **Tipos de imagen aceptados:** JPEG, PNG, WebP, HEIC, HEIF
 
 **Estados del registro:**
