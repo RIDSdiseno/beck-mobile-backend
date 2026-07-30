@@ -32,6 +32,8 @@ export const env = {
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || "8h",
   jwtIssuer: process.env.JWT_ISSUER || "beck-mobile-backend",
   jwtAudience: process.env.JWT_AUDIENCE || "beck-app",
+  azureClientId: required("AZURE_AD_CLIENT_ID"),
+  azureTenantId: required("AZURE_AD_TENANT_ID"),
   cloudinaryCloudName: required("CLOUDINARY_CLOUD_NAME"),
   cloudinaryApiKey: required("CLOUDINARY_API_KEY"),
   cloudinaryApiSecret: required("CLOUDINARY_API_SECRET"),

@@ -3,15 +3,21 @@ import request from "supertest";
 // ── Mocks deben ir antes del import de app ────────────────────────────────────
 
 const mockFindFirst = jest.fn();
-const mockUpdate    = jest.fn();
+const mockUpdateMany = jest.fn();
+const mockVerifyMicrosoftIdToken = jest.fn();
 
 jest.mock("../config/prisma", () => ({
   prisma: {
     usuarios: {
       findFirst: (...args: any[]) => mockFindFirst(...args),
-      update:    (...args: any[]) => mockUpdate(...args),
+      updateMany: (...args: any[]) => mockUpdateMany(...args),
     },
   },
+}));
+
+jest.mock("../services/microsoftAuth.service", () => ({
+  verifyMicrosoftIdToken: (...args: any[]) =>
+    mockVerifyMicrosoftIdToken(...args),
 }));
 
 jest.mock("bcryptjs", () => ({
@@ -24,6 +30,8 @@ process.env.JWT_SECRET          = "test-secret-key-minimo-32-caracteres!!";
 process.env.CLOUDINARY_CLOUD_NAME = "test-cloud";
 process.env.CLOUDINARY_API_KEY    = "test-key";
 process.env.CLOUDINARY_API_SECRET = "test-secret";
+process.env.AZURE_AD_CLIENT_ID     = "test-client-id";
+process.env.AZURE_AD_TENANT_ID     = "test-tenant-id";
 
 import app from "../app";
 import bcrypt from "bcryptjs";
@@ -51,6 +59,84 @@ const USUARIO_BECK = {
   azure_id:      null,
   activo:        true,
 };
+
+// ── Tests: POST /api/mobile/auth/microsoft ────────────────────────────────────
+
+describe("POST /api/mobile/auth/microsoft", () => {
+  beforeEach(() => {
+    mockFindFirst.mockReset();
+    mockUpdateMany.mockReset();
+    mockVerifyMicrosoftIdToken.mockReset();
+  });
+
+  it("rechaza si falta el idToken", async () => {
+    const res = await request(app)
+      .post("/api/mobile/auth/microsoft")
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(mockVerifyMicrosoftIdToken).not.toHaveBeenCalled();
+  });
+
+  it("permite a un usuario activo creado en el CRM y enlaza su cuenta", async () => {
+    mockVerifyMicrosoftIdToken.mockResolvedValue({
+      oid: "azure-oid-1",
+      email: USUARIO_BECK.email,
+      name: USUARIO_BECK.nombre,
+    });
+    mockFindFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(USUARIO_BECK);
+    mockUpdateMany.mockResolvedValue({ count: 1 });
+
+    const res = await request(app)
+      .post("/api/mobile/auth/microsoft")
+      .send({ idToken: "token-microsoft-valido" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.user.id).toBe(USUARIO_BECK.id);
+    expect(typeof res.body.token).toBe("string");
+    expect(mockUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: USUARIO_BECK.id, azure_id: null },
+      })
+    );
+  });
+
+  it("rechaza una identidad Microsoft que no existe en el CRM", async () => {
+    mockVerifyMicrosoftIdToken.mockResolvedValue({
+      oid: "azure-oid-desconocido",
+      email: "desconocido@example.com",
+      name: "Desconocido",
+    });
+    mockFindFirst.mockResolvedValue(null);
+
+    const res = await request(app)
+      .post("/api/mobile/auth/microsoft")
+      .send({ idToken: "token-microsoft-valido" });
+
+    expect(res.status).toBe(403);
+    expect(mockUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("rechaza si el correo del CRM ya está asociado a otra identidad", async () => {
+    mockVerifyMicrosoftIdToken.mockResolvedValue({
+      oid: "azure-oid-nuevo",
+      email: USUARIO_BECK.email,
+      name: USUARIO_BECK.nombre,
+    });
+    mockFindFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ ...USUARIO_BECK, azure_id: "azure-oid-anterior" });
+
+    const res = await request(app)
+      .post("/api/mobile/auth/microsoft")
+      .send({ idToken: "token-microsoft-valido" });
+
+    expect(res.status).toBe(403);
+    expect(mockUpdateMany).not.toHaveBeenCalled();
+  });
+});
 
 // ── Tests: POST /api/mobile/auth/email ────────────────────────────────────────
 

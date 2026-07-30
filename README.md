@@ -203,6 +203,7 @@ El middleware `verifyAppToken` decodifica el token y adjunta el payload a `req.u
 | Método | Ruta | Body | Descripción |
 |--------|------|------|-------------|
 | `POST` | `/email` | `{ email, password }` | Login con correo y contraseña |
+| `POST` | `/microsoft` | `{ idToken }` | Login Microsoft para usuarios activos creados en el CRM |
 
 **Respuesta exitosa:**
 ```json
