@@ -127,8 +127,8 @@ function mapControlPrivatePhotos(control: any) {
 }
 
 export async function findRegistroWithDetails(id: string) {
-  return prisma.registros_terreno.findUnique({
-    where: { id },
+  return prisma.registros_terreno.findFirst({
+    where: { id, carga_completa: true },
     include: {
       obras: {
         select: {
@@ -204,6 +204,9 @@ export async function getIngenieriaResumen(req: Request, res: Response) {
 
     const grouped = await prisma.registros_terreno.groupBy({
       by: ["estado"],
+      where: {
+        carga_completa: true,
+      },
       _count: {
         _all: true,
       },
@@ -258,6 +261,7 @@ export async function getIngenieriaRegistros(req: Request, res: Response) {
 
     const registros = await prisma.registros_terreno.findMany({
       where: {
+        carga_completa: true,
         ...(estado ? { estado: estado as EstadoRegistroTerreno } : {}),
         ...(obraId ? { obra_id: obraId } : {}),
         ...(search
@@ -372,6 +376,14 @@ export async function iniciarRevisionIngenieria(req: Request, res: Response) {
       });
     }
 
+    if (!currentRegistro.carga_completa) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro todavía no tiene una fotografía guardada",
+        code: "REGISTRO_INCOMPLETO",
+      });
+    }
+
     if (currentRegistro.estado !== EstadoRegistroTerreno.pendiente) {
       return res.status(400).json({
         success: false,
@@ -381,7 +393,11 @@ export async function iniciarRevisionIngenieria(req: Request, res: Response) {
 
     const transitioned = await prisma.$transaction(async (tx) => {
       const updated = await tx.registros_terreno.updateMany({
-        where: { id: registroId, estado: EstadoRegistroTerreno.pendiente },
+        where: {
+          id: registroId,
+          estado: EstadoRegistroTerreno.pendiente,
+          carga_completa: true,
+        },
         data: {
           estado: EstadoRegistroTerreno.en_revision,
           devuelto_a_tecnico: false,
@@ -449,6 +465,14 @@ export async function updateRegistroIngenieria(req: Request, res: Response) {
       return res.status(404).json({
         success: false,
         error: "Registro no encontrado",
+      });
+    }
+
+    if (!currentRegistro.carga_completa) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro todavía no tiene una fotografía guardada",
+        code: "REGISTRO_INCOMPLETO",
       });
     }
 
@@ -639,7 +663,11 @@ export async function updateRegistroIngenieria(req: Request, res: Response) {
     data.updated_at = new Date();
 
     const updated = await prisma.registros_terreno.updateMany({
-      where: { id: registroId, estado: EstadoRegistroTerreno.en_revision },
+      where: {
+        id: registroId,
+        estado: EstadoRegistroTerreno.en_revision,
+        carga_completa: true,
+      },
       data,
     });
     if (updated.count !== 1) {
@@ -699,6 +727,14 @@ export async function validarRegistroIngenieria(req: Request, res: Response) {
       });
     }
 
+    if (!currentRegistro.carga_completa) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro todavía no tiene una fotografía guardada",
+        code: "REGISTRO_INCOMPLETO",
+      });
+    }
+
     if (currentRegistro.estado !== EstadoRegistroTerreno.en_revision) {
       return res.status(400).json({
         success: false,
@@ -708,7 +744,11 @@ export async function validarRegistroIngenieria(req: Request, res: Response) {
 
     const transitioned = await prisma.$transaction(async (tx) => {
       const updated = await tx.registros_terreno.updateMany({
-        where: { id: registroId, estado: EstadoRegistroTerreno.en_revision },
+        where: {
+          id: registroId,
+          estado: EstadoRegistroTerreno.en_revision,
+          carga_completa: true,
+        },
         data: {
           estado: EstadoRegistroTerreno.validado,
           motivo_rechazo: null,
@@ -798,6 +838,14 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
       });
     }
 
+    if (!currentRegistro.carga_completa) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro todavía no tiene una fotografía guardada",
+        code: "REGISTRO_INCOMPLETO",
+      });
+    }
+
     if (currentRegistro.estado !== EstadoRegistroTerreno.en_revision) {
       return res.status(400).json({
         success: false,
@@ -821,7 +869,11 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
 
     const result = await prisma.$transaction(async (tx) => {
       const rejected = await tx.registros_terreno.updateMany({
-        where: { id: registroId, estado: EstadoRegistroTerreno.en_revision },
+        where: {
+          id: registroId,
+          estado: EstadoRegistroTerreno.en_revision,
+          carga_completa: true,
+        },
         data: {
           estado: EstadoRegistroTerreno.rechazado,
           motivo_rechazo: motivoRechazo,

@@ -338,6 +338,7 @@ model registros_terreno {
   holgura                                                             Decimal                   @db.Decimal(3, 1)
   observaciones                                                       String?
   fotos_urls                                                          String[]
+  carga_completa                                                      Boolean                   @default(true)
   created_at                                                          DateTime                  @default(now()) @db.Timestamp(6)
   updated_at                                                          DateTime                  @default(now()) @db.Timestamp(6)
   estado                                                              EstadoRegistroTerreno     @default(pendiente)
@@ -408,6 +409,7 @@ model registros_terreno {
   @@index([inspeccion_revision_por_id])
   @@index([validado_cliente])
   @@index([validado_cliente_por_id])
+  @@index([carga_completa, created_at])
 }
 
 model fotos_registro {

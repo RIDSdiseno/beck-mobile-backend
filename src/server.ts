@@ -1,6 +1,7 @@
 import app from "./app";
 import { env } from "./config/env";
 import { closePrismaConnection } from "./config/prisma";
+import { iniciarLimpiezaRegistrosIncompletos } from "./services/registrosIncompletos.service";
 
 process.on("unhandledRejection", (reason) => {
   console.error("UNHANDLED_REJECTION:", reason);
@@ -15,12 +16,14 @@ process.on("uncaughtException", (error) => {
 const server = app.listen(env.port, () => {
   console.log(`Backend móvil corriendo en http://localhost:${env.port}`);
 });
+const registrosIncompletosTimer = iniciarLimpiezaRegistrosIncompletos();
 
 let isShuttingDown = false;
 
 async function shutdown(signal: string, exitCode = 0) {
   if (isShuttingDown) return;
   isShuttingDown = true;
+  clearInterval(registrosIncompletosTimer);
   console.info("SHUTDOWN", { signal });
 
   const forceExit = setTimeout(() => process.exit(1), 10_000);

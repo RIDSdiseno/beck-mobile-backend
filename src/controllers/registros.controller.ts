@@ -7,6 +7,7 @@ import {
   withPrivateImageUrl,
 } from "../services/cloudinary.service";
 import { calcularCamposConConfiguracion } from "../services/calculosRegistroTerreno.service";
+import { eliminarRegistroIncompleto } from "../services/registrosIncompletos.service";
 import { canAccessObra } from "../services/obras.service";
 
 function getDiaSemana(fecha: Date) {
@@ -326,6 +327,7 @@ export async function createRegistro(req: Request, res: Response) {
         cantidad_final: calcResult?.cantidad_final ?? null,
         observaciones: normalizeText(observaciones) || null,
         fotos_urls: [],
+        carga_completa: false,
         estado: "pendiente",
         devuelto_a_tecnico: false,
         itemizado_mandante: isJuntaLineal
@@ -385,6 +387,7 @@ export async function getMisRegistros(req: Request, res: Response) {
     const where =
       userRole === "jefeobra"
         ? {
+            carga_completa: true,
             ...(obraId ? { obra_id: obraId } : {}),
             ...(estado ? { estado: estado as EstadoRegistroTerreno } : {}),
             obras: {
@@ -397,6 +400,7 @@ export async function getMisRegistros(req: Request, res: Response) {
             },
           }
         : {
+            carga_completa: true,
             usuario_id: userId,
             ...(estado ? { estado: estado as EstadoRegistroTerreno } : {}),
             ...(scope === "registro"
@@ -592,6 +596,14 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
       });
     }
 
+    if (!currentRegistro.carga_completa) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro todavía no tiene una fotografía guardada",
+        code: "REGISTRO_INCOMPLETO",
+      });
+    }
+
     if (
       currentRegistro.estado === EstadoRegistroTerreno.validado ||
       currentRegistro.estado === EstadoRegistroTerreno.en_revision ||
@@ -744,6 +756,7 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
         id: registroId,
         estado: currentRegistro.estado,
         validado_cliente: false,
+        carga_completa: true,
       },
       data: {
         fecha: fechaDate,
@@ -872,6 +885,14 @@ export async function devolverRegistroATecnico(req: Request, res: Response) {
       });
     }
 
+    if (!currentRegistro.carga_completa) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro todavía no tiene una fotografía guardada",
+        code: "REGISTRO_INCOMPLETO",
+      });
+    }
+
     if (currentRegistro.estado !== "rechazado") {
       return res.status(400).json({
         success: false,
@@ -891,7 +912,11 @@ export async function devolverRegistroATecnico(req: Request, res: Response) {
     }
 
     const transition = await prisma.registros_terreno.updateMany({
-      where: { id: registroId, estado: EstadoRegistroTerreno.rechazado },
+      where: {
+        id: registroId,
+        estado: EstadoRegistroTerreno.rechazado,
+        carga_completa: true,
+      },
       data: {
         estado: "rechazado",
         devuelto_a_tecnico: true,
@@ -1042,6 +1067,14 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
       });
     }
 
+    if (!currentRegistro.carga_completa) {
+      return res.status(409).json({
+        success: false,
+        error: "El registro todavía no tiene una fotografía guardada",
+        code: "REGISTRO_INCOMPLETO",
+      });
+    }
+
     if (currentRegistro.estado !== "pendiente") {
       return res.status(400).json({
         success: false,
@@ -1184,7 +1217,11 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
         });
 
     const transition = await prisma.registros_terreno.updateMany({
-      where: { id: registroId, estado: EstadoRegistroTerreno.pendiente },
+      where: {
+        id: registroId,
+        estado: EstadoRegistroTerreno.pendiente,
+        carga_completa: true,
+      },
       data: {
         fecha: fechaDate,
         dia_semana: getDiaSemana(fechaDate),
@@ -1541,6 +1578,7 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
           data: {
             foto_url: fotosActuales[0]?.url || null,
             fotos_urls: fotosActuales.map((foto) => foto.url),
+            carga_completa: fotosActuales.length > 0,
           },
         });
 
@@ -1568,6 +1606,10 @@ export async function uploadRegistroFotos(req: Request, res: Response) {
           deleteImageFromCloudinary(foto.public_id)
         )
       );
+
+      await eliminarRegistroIncompleto(registro.id, userId).catch((cleanupError) => {
+        console.error("DELETE REGISTRO INCOMPLETO ERROR:", cleanupError);
+      });
 
       throw uploadError;
     }

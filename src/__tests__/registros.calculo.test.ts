@@ -118,6 +118,7 @@ describe("createRegistro usa el cálculo autoritativo", () => {
         cantidad_sellos_aislacion: 1.3,
         reparacion_tabique: 1,
         cantidad_final: 8.8,
+        carga_completa: false,
       }),
     });
     expect(response.status).toHaveBeenCalledWith(201);

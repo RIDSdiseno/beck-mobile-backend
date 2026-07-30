@@ -1,5 +1,6 @@
 import multer from "multer";
 import { NextFunction, Request, Response } from "express";
+import { eliminarRegistroIncompleto } from "../services/registrosIncompletos.service";
 
 const storage = multer.memoryStorage();
 const MAX_REGISTRO_FOTOS = 10;
@@ -67,10 +68,33 @@ export function uploadRegistroFotosFiles(
   res: Response,
   next: NextFunction
 ) {
-  upload.array("fotos", MAX_REGISTRO_FOTOS)(req, res, (error) => {
+  upload.array("fotos", MAX_REGISTRO_FOTOS)(req, res, async (error) => {
     if (!error) {
-      validateUploadedImages(req, res, next);
+      const files = req.files as Express.Multer.File[] | undefined;
+      if ((files || []).some((file) => !hasAllowedImageSignature(file))) {
+        if (req.user?.id && typeof req.params.id === "string") {
+          await eliminarRegistroIncompleto(req.params.id, req.user.id).catch(
+            (cleanupError) => {
+              console.error("DELETE REGISTRO INCOMPLETO ERROR:", cleanupError);
+            },
+          );
+        }
+        return res.status(400).json({
+          success: false,
+          error: "Uno de los archivos no contiene una imagen válida",
+        });
+      }
+
+      next();
       return;
+    }
+
+    if (req.user?.id && typeof req.params.id === "string") {
+      await eliminarRegistroIncompleto(req.params.id, req.user.id).catch(
+        (cleanupError) => {
+          console.error("DELETE REGISTRO INCOMPLETO ERROR:", cleanupError);
+        },
+      );
     }
 
     if (error instanceof multer.MulterError) {
