@@ -105,7 +105,13 @@ function pdfFieldRow(
 
 // ── Generación de contenido PDF ──────────────────────────────────────────────────
 
-function buildPdfContent(doc: PDFKit.PDFDocument, registro: any, validImages: Buffer[]): void {
+function buildPdfContent(
+  doc: PDFKit.PDFDocument,
+  registro: any,
+  validImages: Buffer[],
+  visibleCampos?: Set<string>,
+): void {
+  const visible = (campo: string) => !visibleCampos || visibleCampos.has(campo);
   const esJunta        = registro.tipo_registro === "junta_lineal_espuma";
   const codigoRegistro = registro.codigo_beck ?? `REG-${registro.id.slice(0, 6).toUpperCase()}`;
   const tituloTipo     = esJunta ? "Registro de Junta Lineal Espuma" : "Registro de Sello Cortafuego";
@@ -137,8 +143,15 @@ function buildPdfContent(doc: PDFKit.PDFDocument, registro: any, validImages: Bu
   // ── Título y badge ─────────────────────────────────────────────────────────────
   doc.font("Helvetica-Bold").fontSize(14).fillColor(BECK_DARK).text(tituloTipo);
   doc.y += 3;
-  doc.font("Helvetica").fontSize(10).fillColor(TEXT_MUTED)
-    .text(`Código: ${codigoRegistro}   ·   Fecha ejecución: ${formatDate(registro.fecha)}`);
+  const resumen: string[] = [];
+  if (visible("codigoBeck")) resumen.push(`Código: ${codigoRegistro}`);
+  if (visible("fechaEjecucionSello")) {
+    resumen.push(`Fecha ejecución: ${formatDate(registro.fecha)}`);
+  }
+  if (resumen.length > 0) {
+    doc.font("Helvetica").fontSize(10).fillColor(TEXT_MUTED)
+      .text(resumen.join("   ·   "));
+  }
   doc.y += 8;
 
   const fueInspeccionadoConforme =
@@ -162,36 +175,59 @@ function buildPdfContent(doc: PDFKit.PDFDocument, registro: any, validImages: Bu
 
   // ── Información General ────────────────────────────────────────────────────────
   pdfSectionHeader(doc, "INFORMACIÓN GENERAL");
-  pdfFieldRow(doc, "Código BECK:",   codigoRegistro);
+  if (visible("codigoBeck")) pdfFieldRow(doc, "Código BECK:", codigoRegistro);
   pdfFieldRow(doc, "Obra:",          `${registro.obras?.nombre ?? "-"}${registro.obras?.codigo ? ` (${registro.obras.codigo})` : ""}`);
   pdfFieldRow(doc, "Cliente:",       registro.obras?.cliente ?? "-");
-  pdfFieldRow(doc, "Ejecutado por:", registro.usuarios?.nombre ?? "-");
-  pdfFieldRow(doc, "Día semana:",    registro.dia_semana);
-  pdfFieldRow(doc, "Folio:",         registro.folio);
+  if (visible("nombreSellador")) {
+    pdfFieldRow(doc, "Ejecutado por:", registro.usuarios?.nombre ?? "-");
+  }
+  if (visible("diaSemana")) pdfFieldRow(doc, "Día semana:", registro.dia_semana);
+  if (visible("folio")) pdfFieldRow(doc, "Folio:", registro.folio);
 
   pdfHRule(doc);
 
   // ── Datos Técnicos ─────────────────────────────────────────────────────────────
   pdfSectionHeader(doc, "DATOS TÉCNICOS");
-  pdfFieldRow(doc, "Descripción material:",     registro.descripcion_material);
-  pdfFieldRow(doc, "Recinto:",                  registro.recinto);
-  pdfFieldRow(doc, "Módulo / Edificio:",        registro.modulo);
-  pdfFieldRow(doc, "Piso:",                     registro.piso);
-  pdfFieldRow(doc, "Eje alfabético:",           registro.eje_alfabetico);
-  pdfFieldRow(doc, "Eje numérico:",             registro.eje_numerico);
-  if (!esJunta) {
+  if (visible("itemizadoBeck")) {
+    pdfFieldRow(doc, "Itemizado BECK:", registro.itemizado_beck || registro.descripcion_material);
+  }
+  if (visible("itemizadoMandante")) {
+    pdfFieldRow(doc, "Itemizado Mandante:", registro.itemizado_mandante);
+  }
+  if (visible("recinto")) pdfFieldRow(doc, "Recinto:", registro.recinto);
+  if (visible("modulo")) pdfFieldRow(doc, "Módulo / Edificio:", registro.modulo);
+  if (visible("piso")) pdfFieldRow(doc, "Piso:", registro.piso);
+  if (visible("eje_alfabetico")) {
+    pdfFieldRow(doc, "Eje alfabético:", registro.eje_alfabetico);
+  }
+  if (visible("eje_numerico")) {
+    pdfFieldRow(doc, "Eje numérico:", registro.eje_numerico);
+  }
+  if (!esJunta && visible("numeroSello")) {
     pdfFieldRow(doc, "N° de sello:", registro.numero_sello);
   }
-  pdfFieldRow(doc, `${cantLabel}:`,            cantValor);
-  pdfFieldRow(doc, "Sellador / Cuadrilla:",     registro.nombre_sellador);
-  pdfFieldRow(doc, "Holgura (cm):",            registro.holgura != null ? registro.holgura.toString() : "-");
-  pdfFieldRow(doc, "Factor por holguras:",     registro.factor_por_holguras != null ? registro.factor_por_holguras.toString() : "-");
-  pdfFieldRow(doc, "Accesibilidad:",           registro.accesibilidad);
-  pdfFieldRow(doc, "Sellos con factores:",     registro.cantidad_sellos_con_factores != null ? registro.cantidad_sellos_con_factores.toString() : "-");
-  pdfFieldRow(doc, "Aislación:",              registro.aislacion != null ? registro.aislacion.toString() : "-");
-  pdfFieldRow(doc, "Sellos aislación:",       registro.cantidad_sellos_aislacion != null ? registro.cantidad_sellos_aislacion.toString() : "-");
-  pdfFieldRow(doc, "Reparación tabique:",     registro.reparacion_tabique != null ? registro.reparacion_tabique.toString() : "-");
-  pdfFieldRow(doc, "Cantidad final:",         registro.cantidad_final != null ? registro.cantidad_final.toString() : "-");
+  if (visible("cantidadSellos")) pdfFieldRow(doc, `${cantLabel}:`, cantValor);
+  if (visible("nombreSellador")) {
+    pdfFieldRow(doc, "Sellador / Cuadrilla:", registro.nombre_sellador);
+  }
+  if (visible("holgura")) pdfFieldRow(doc, "Holgura (cm):", registro.holgura?.toString());
+  if (visible("factor_por_holguras")) {
+    pdfFieldRow(doc, "Factor por holguras:", registro.factor_por_holguras?.toString());
+  }
+  if (visible("accesibilidad")) pdfFieldRow(doc, "Accesibilidad:", registro.accesibilidad);
+  if (visible("cantidad_sellos_con_factores")) {
+    pdfFieldRow(doc, "Sellos con factores:", registro.cantidad_sellos_con_factores?.toString());
+  }
+  if (visible("aislacion")) pdfFieldRow(doc, "Aislación:", registro.aislacion?.toString());
+  if (visible("cantidad_sellos_aislacion")) {
+    pdfFieldRow(doc, "Sellos aislación:", registro.cantidad_sellos_aislacion?.toString());
+  }
+  if (visible("reparacion_tabique")) {
+    pdfFieldRow(doc, "Reparación tabique:", registro.reparacion_tabique?.toString());
+  }
+  if (visible("cantidad_final")) {
+    pdfFieldRow(doc, "Cantidad final:", registro.cantidad_final?.toString());
+  }
 
   pdfHRule(doc);
 
@@ -201,39 +237,41 @@ function buildPdfContent(doc: PDFKit.PDFDocument, registro: any, validImages: Bu
     .text(registro.observaciones || "Sin observaciones.", PDF_MARGIN, doc.y, { width: PDF_CONTENT_W });
   doc.y += 6;
 
-  pdfHRule(doc);
+  if (visible("foto")) {
+    pdfHRule(doc);
 
-  // ── Fotografías ────────────────────────────────────────────────────────────────
-  pdfSectionHeader(doc, "FOTOGRAFÍAS DE REGISTRO");
+    // ── Fotografías ──────────────────────────────────────────────────────────────
+    pdfSectionHeader(doc, "FOTOGRAFÍAS DE REGISTRO");
 
-  if (validImages.length === 0) {
-    doc.font("Helvetica").fontSize(9).fillColor("#94a3b8")
-      .text("Sin fotos asociadas.", PDF_MARGIN, doc.y);
-  } else {
-    const imgW = Math.floor((PDF_CONTENT_W - 10) / 2);
-    const imgH = 175;
-    const gap  = 10;
-    let rowY   = doc.y + 4;
-    let colIdx = 0;
+    if (validImages.length === 0) {
+      doc.font("Helvetica").fontSize(9).fillColor("#94a3b8")
+        .text("Sin fotos asociadas.", PDF_MARGIN, doc.y);
+    } else {
+      const imgW = Math.floor((PDF_CONTENT_W - 10) / 2);
+      const imgH = 175;
+      const gap  = 10;
+      let rowY   = doc.y + 4;
+      let colIdx = 0;
 
-    validImages.forEach((buf, imgIndex) => {
-      if (colIdx === 0 && rowY + imgH > 800) {
-        doc.addPage();
-        rowY = PDF_MARGIN;
-      }
+      validImages.forEach((buf, imgIndex) => {
+        if (colIdx === 0 && rowY + imgH > 800) {
+          doc.addPage();
+          rowY = PDF_MARGIN;
+        }
 
-      const isAlone = colIdx === 0 && imgIndex === validImages.length - 1;
-      const imgX    = isAlone
-        ? PDF_MARGIN + (PDF_CONTENT_W - imgW) / 2
-        : PDF_MARGIN + colIdx * (imgW + gap);
+        const isAlone = colIdx === 0 && imgIndex === validImages.length - 1;
+        const imgX    = isAlone
+          ? PDF_MARGIN + (PDF_CONTENT_W - imgW) / 2
+          : PDF_MARGIN + colIdx * (imgW + gap);
 
-      try { doc.image(buf, imgX, rowY, { fit: [imgW, imgH] }); } catch { /* imagen no procesable */ }
+        try { doc.image(buf, imgX, rowY, { fit: [imgW, imgH] }); } catch { /* imagen no procesable */ }
 
-      colIdx++;
-      if (colIdx >= 2) { colIdx = 0; rowY += imgH + 10; }
-    });
+        colIdx++;
+        if (colIdx >= 2) { colIdx = 0; rowY += imgH + 10; }
+      });
 
-    doc.y = rowY + (colIdx > 0 ? imgH : 0) + 12;
+      doc.y = rowY + (colIdx > 0 ? imgH : 0) + 12;
+    }
   }
 }
 
@@ -250,8 +288,11 @@ export interface SignatureOptions {
 export async function generateRegistroPdfBuffer(
   registro: any,
   signatureOptions?: SignatureOptions,
+  visibleCampos?: Set<string>,
 ): Promise<Buffer> {
-  const fotoUrls: string[] =
+  const fotoUrls: string[] = visibleCampos && !visibleCampos.has("foto")
+    ? []
+    :
     registro.fotos && registro.fotos.length > 0
       ? registro.fotos.map((foto: any) =>
           foto.public_id
@@ -286,7 +327,7 @@ export async function generateRegistroPdfBuffer(
     doc.on("end",  () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    buildPdfContent(doc, registro, validImages);
+    buildPdfContent(doc, registro, validImages, visibleCampos);
 
     // ── Sección de firma cliente (si aplica) ─────────────────────────────────────
     if (signatureOptions?.pathData) {

@@ -1,101 +1,9 @@
 import { Request, Response } from "express";
-import { prisma } from "../config/prisma";
 import { getMisObrasByUser } from "../services/obras.service";
-
-type RolConfiguracionRegistro = "trabajador" | "jefeobra" | "cliente";
-type ColorCampoRegistro = "verde" | "azul" | "rojo";
-
-type CampoRegistroConfig = {
-  campo: string;
-  appCampo: string;
-  color: ColorCampoRegistro;
-};
-
-const CAMPOS_REGISTRO_JEFEOBRA: CampoRegistroConfig[] = [
-  { campo: "tipo_registro", appCampo: "tipoRegistro", color: "verde" },
-  { campo: "codigoBeck", appCampo: "codigoBeck", color: "verde" },
-  { campo: "itemizadoBeck", appCampo: "itemizadoBeck", color: "verde" },
-  { campo: "itemizadoMandante", appCampo: "itemizadoMandante", color: "verde" },
-  { campo: "fechaEjecucionSello", appCampo: "fechaEjecucionSello", color: "verde" },
-  { campo: "diaSemana", appCampo: "diaSemana", color: "verde" },
-  { campo: "piso", appCampo: "piso", color: "verde" },
-  { campo: "eje_alfabetico", appCampo: "ejeAlfabetico", color: "azul" },
-  { campo: "eje_numerico", appCampo: "ejeNumerico", color: "azul" },
-  { campo: "nombreSellador", appCampo: "nombreSellador", color: "verde" },
-  { campo: "foto", appCampo: "foto", color: "verde" },
-  { campo: "recinto", appCampo: "recinto", color: "azul" },
-  { campo: "modulo", appCampo: "modulo", color: "azul" },
-  { campo: "numeroSello", appCampo: "numeroSello", color: "verde" },
-  { campo: "cantidadSellos", appCampo: "cantidadSellos", color: "verde" },
-  { campo: "metros_lineales", appCampo: "metrosLineales", color: "verde" },
-  { campo: "holgura", appCampo: "holgura", color: "azul" },
-  { campo: "factor_por_holguras", appCampo: "factorPorHolguras", color: "azul" },
-  { campo: "accesibilidad", appCampo: "cieloModular", color: "azul" },
-  {
-    campo: "cantidad_sellos_con_factores",
-    appCampo: "cantidadSellosConFactores",
-    color: "azul",
-  },
-  { campo: "aislacion", appCampo: "aislacion", color: "azul" },
-  {
-    campo: "cantidad_sellos_aislacion",
-    appCampo: "cantidadSellosAislacion",
-    color: "azul",
-  },
-  { campo: "reparacion_tabique", appCampo: "reparacionTabique", color: "azul" },
-  { campo: "cantidad_final", appCampo: "cantidadFinal", color: "azul" },
-  { campo: "observaciones", appCampo: "observaciones", color: "verde" },
-  { campo: "folio", appCampo: "folio", color: "azul" },
-];
-
-const CAMPOS_REGISTRO_TRABAJADOR: CampoRegistroConfig[] =
-  CAMPOS_REGISTRO_JEFEOBRA.map((campo) => {
-    const camposRojos = new Set([
-      "codigoBeck",
-      "itemizadoMandante",
-      "factor_por_holguras",
-      "cantidad_sellos_con_factores",
-      "cantidad_sellos_aislacion",
-      "cantidad_final",
-      "folio",
-    ]);
-
-    return {
-      ...campo,
-      color: camposRojos.has(campo.campo) ? "rojo" : campo.color,
-    };
-  });
-
-// Cliente ve el registro ya finalizado en modo solo lectura, por eso el
-// catalogo mapea directamente a los nombres de RegistroCliente (services/api/clienteApi.ts)
-// en vez de a los nombres de estado del formulario de terreno/jefeobra.
-const CAMPOS_REGISTRO_CLIENTE: CampoRegistroConfig[] = [
-  { campo: "codigoBeck", appCampo: "codigoBeck", color: "azul" },
-  { campo: "itemizadoBeck", appCampo: "itemizadoBeck", color: "azul" },
-  { campo: "itemizadoMandante", appCampo: "itemizadoMandante", color: "azul" },
-  { campo: "diaSemana", appCampo: "diaSemana", color: "azul" },
-  { campo: "piso", appCampo: "piso", color: "azul" },
-  { campo: "eje_alfabetico", appCampo: "eje", color: "azul" },
-  { campo: "nombreSellador", appCampo: "nombreSellador", color: "azul" },
-  { campo: "recinto", appCampo: "recinto", color: "azul" },
-  { campo: "modulo", appCampo: "modulo", color: "azul" },
-  { campo: "numeroSello", appCampo: "numeroSello", color: "azul" },
-  { campo: "cantidadSellos", appCampo: "cantidadSellos", color: "azul" },
-  { campo: "holgura", appCampo: "holgura", color: "azul" },
-  { campo: "factor_por_holguras", appCampo: "factorPorHolguras", color: "azul" },
-  { campo: "accesibilidad", appCampo: "cieloModular", color: "azul" },
-  { campo: "cantidad_final", appCampo: "cantidadFinal", color: "azul" },
-  { campo: "folio", appCampo: "folio", color: "azul" },
-];
-
-const CAMPOS_REGISTRO_POR_ROL: Record<
-  RolConfiguracionRegistro,
-  CampoRegistroConfig[]
-> = {
-  jefeobra: CAMPOS_REGISTRO_JEFEOBRA,
-  trabajador: CAMPOS_REGISTRO_TRABAJADOR,
-  cliente: CAMPOS_REGISTRO_CLIENTE,
-};
+import {
+  normalizarRolConfiguracion,
+  obtenerConfiguracionRegistro,
+} from "../services/configuracionCamposRegistro.service";
 
 export async function getMisObras(req: Request, res: Response) {
   try {
@@ -145,7 +53,8 @@ export async function getConfiguracionRegistro(req: Request, res: Response) {
       });
     }
 
-    if (rol !== "terreno" && rol !== "jefeobra" && rol !== "cliente") {
+    const rolConfiguracion = normalizarRolConfiguracion(rol);
+    if (!rolConfiguracion) {
       return res.status(403).json({
         success: false,
         error: "Tu rol no utiliza configuracion de registro movil",
@@ -160,39 +69,19 @@ export async function getConfiguracionRegistro(req: Request, res: Response) {
       });
     }
 
-    const rolConfiguracion: RolConfiguracionRegistro =
-      rol === "terreno" ? "trabajador" : rol === "cliente" ? "cliente" : "jefeobra";
-    const catalogo = CAMPOS_REGISTRO_POR_ROL[rolConfiguracion];
-    const camposCatalogo = catalogo.map((campo) => campo.campo);
-
-    const configuracion = await prisma.configuracion_campos_registro.findMany({
-      where: {
-        obra_id: obraId,
-        rol: rolConfiguracion,
-        campo: { in: camposCatalogo },
-      },
-      select: {
-        campo: true,
-        visible: true,
-      },
-    });
-    const configuracionPorCampo = new Map(
-      configuracion.map((campo) => [campo.campo, campo.visible]),
+    const configuracion = await obtenerConfiguracionRegistro(
+      obraId,
+      rolConfiguracion,
     );
 
     return res.json({
       success: true,
-      data: catalogo.map((campo) => ({
+      data: configuracion.map((campo) => ({
         campo: campo.appCampo,
         campoOrigen: campo.campo,
         color: campo.color,
-        configurable: campo.color === "azul",
-        visible:
-          campo.color === "verde"
-            ? true
-            : campo.color === "rojo"
-              ? false
-              : configuracionPorCampo.get(campo.campo) ?? true,
+        configurable: campo.configurable,
+        visible: campo.visible,
       })),
     });
   } catch (error) {

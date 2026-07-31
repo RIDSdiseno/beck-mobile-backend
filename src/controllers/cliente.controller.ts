@@ -8,6 +8,7 @@ import {
 } from "../services/cloudinary.service";
 import { findRegistroWithDetails } from "./ingenieria.controller";
 import { generateRegistroPdfBuffer } from "./registroPdf.controller";
+import { obtenerConfiguracionRegistro } from "../services/configuracionCamposRegistro.service";
 
 function requireCliente(req: Request, res: Response) {
   const userId   = req.user?.id;
@@ -395,13 +396,22 @@ export async function validarRegistroCliente(req: Request, res: Response) {
     const firmadoPor = firmante?.nombre || "Cliente";
 
     // Generar PDF con firma incrustada
+    const configuracionCliente = await obtenerConfiguracionRegistro(
+      registroBase.obra_id,
+      "cliente",
+    );
+    const camposVisiblesCliente = new Set(
+      configuracionCliente
+        .filter((campo) => campo.visible)
+        .map((campo) => campo.campo),
+    );
     const pdfBuffer = await generateRegistroPdfBuffer(registroFull, {
       pathData,
       canvasWidth:  safeCanvasWidth,
       canvasHeight: safeCanvasHeight,
       firmadoPor,
       firmadoAt,
-    });
+    }, camposVisiblesCliente);
 
     const codigoBeck = registroBase.codigo_beck ?? `REG-${id.slice(0, 6).toUpperCase()}`;
     const safeCodigoBeck = codigoBeck.replace(/[^a-zA-Z0-9_-]/g, "_");
