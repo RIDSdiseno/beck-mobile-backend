@@ -3,6 +3,10 @@ import bcrypt from "bcryptjs";
 import { prisma } from "../config/prisma";
 import { signAppToken } from "../services/jwt.service";
 import { verifyMicrosoftIdToken } from "../services/microsoftAuth.service";
+import {
+  normalizarEmpresa,
+  obtenerEmpresaUsuario,
+} from "../services/empresa.service";
 
 const IS_PROD = process.env.NODE_ENV === "production";
 
@@ -33,30 +37,24 @@ function logAuthOk(email: string, userId: string, rol: string, ip: string) {
   });
 }
 
-const ALLOWED_LOGIN_ROLES = new Set([
-  "administrador",
-  "terreno",
-  "jefeobra",
-  "ingenieria",
-  "cliente",
-]);
-
 function buildAppUser(usuario: {
   id: string;
   nombre: string;
   email: string;
   rol: string;
 }) {
+  const empresa = obtenerEmpresaUsuario(usuario.email, usuario.rol);
+  if (!empresa) {
+    throw new Error("USER_COMPANY_MISMATCH");
+  }
+
   return {
     id: usuario.id,
     nombre: usuario.nombre,
     email: usuario.email,
     rol: usuario.rol,
+    empresa,
   };
-}
-
-function canLogin(rol: string) {
-  return ALLOWED_LOGIN_ROLES.has(rol);
 }
 
 function createLoginResponse(usuario: {
@@ -78,13 +76,24 @@ function createLoginResponse(usuario: {
 function unauthorizedLoginResponse(res: Response) {
   return res.status(403).json({
     success: false,
-    error: "Tu cuenta no está autorizada en Beck",
+    error: "Tu cuenta no está autorizada para esta aplicación",
+  });
+}
+
+function companyMismatchResponse(res: Response, empresa: "beck" | "firemat") {
+  const nombre = empresa === "firemat" ? "Firemat" : "Beck";
+  return res.status(403).json({
+    success: false,
+    error: `Esta cuenta pertenece al acceso ${nombre}`,
+    code: "EMPRESA_MISMATCH",
+    empresa,
   });
 }
 
 export async function microsoftLogin(req: Request, res: Response) {
   try {
     const idToken = req.body?.idToken;
+    const empresaSolicitada = normalizarEmpresa(req.body?.empresa);
 
     if (
       typeof idToken !== "string" ||
@@ -119,9 +128,14 @@ export async function microsoftLogin(req: Request, res: Response) {
       return unauthorizedLoginResponse(res);
     }
 
-    if (!canLogin(usuario.rol)) {
+    const empresaUsuario = obtenerEmpresaUsuario(usuario.email, usuario.rol);
+    if (!empresaUsuario) {
       logAuthFail(microsoftUser.email, getClientIp(req), "role_not_allowed");
       return unauthorizedLoginResponse(res);
+    }
+    if (empresaSolicitada && empresaSolicitada !== empresaUsuario) {
+      logAuthFail(microsoftUser.email, getClientIp(req), "company_mismatch");
+      return companyMismatchResponse(res, empresaUsuario);
     }
 
     if (usuario.azure_id && usuario.azure_id !== microsoftUser.oid) {
@@ -176,6 +190,7 @@ export async function microsoftLogin(req: Request, res: Response) {
 export async function emailLogin(req: Request, res: Response) {
   try {
     const { email, password } = req.body ?? {};
+    const empresaSolicitada = normalizarEmpresa(req.body?.empresa);
     const normalizedEmail = String(email || "").toLowerCase().trim();
 
     if (!normalizedEmail || !password) {
@@ -200,7 +215,8 @@ export async function emailLogin(req: Request, res: Response) {
       });
     }
 
-    if (!canLogin(usuario.rol)) {
+    const empresaUsuario = obtenerEmpresaUsuario(usuario.email, usuario.rol);
+    if (!empresaUsuario) {
       logAuthFail(normalizedEmail, getClientIp(req), "role_not_allowed");
       return unauthorizedLoginResponse(res);
     }
@@ -216,6 +232,11 @@ export async function emailLogin(req: Request, res: Response) {
         success: false,
         error: "Correo o contraseña inválidos",
       });
+    }
+
+    if (empresaSolicitada && empresaSolicitada !== empresaUsuario) {
+      logAuthFail(normalizedEmail, getClientIp(req), "company_mismatch");
+      return companyMismatchResponse(res, empresaUsuario);
     }
 
     logAuthOk(normalizedEmail, usuario.id, usuario.rol, getClientIp(req));

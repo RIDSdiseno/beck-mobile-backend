@@ -60,6 +60,16 @@ const USUARIO_BECK = {
   activo:        true,
 };
 
+const USUARIO_FIREMAT = {
+  id:            "uuid-bodeguero-1",
+  nombre:        "Test Bodeguero",
+  email:         "bodega@firemat.cl",
+  rol:           "bodeguero",
+  password_hash: "$2b$10$hasheado",
+  azure_id:      null,
+  activo:        true,
+};
+
 // ── Tests: POST /api/mobile/auth/microsoft ────────────────────────────────────
 
 describe("POST /api/mobile/auth/microsoft", () => {
@@ -199,6 +209,7 @@ describe("POST /api/mobile/auth/email", () => {
     expect(res.body.success).toBe(true);
     expect(typeof res.body.token).toBe("string");
     expect(res.body.user.rol).toBe("terreno");
+    expect(res.body.user.empresa).toBe("beck");
   });
 
   it("permite login a cliente con cualquier dominio de email", async () => {
@@ -213,7 +224,7 @@ describe("POST /api/mobile/auth/email", () => {
     expect(res.body.user.rol).toBe("cliente");
   });
 
-  it("permite las credenciales creadas en CRM aunque usen dominio externo", async () => {
+  it("rechaza un rol interno Beck con dominio externo", async () => {
     const usuarioExterno = { ...USUARIO_BECK, email: "terreno@gmail.com" };
     mockFindFirst.mockResolvedValue(usuarioExterno);
     bcryptCompare.mockResolvedValue(true);
@@ -222,8 +233,33 @@ describe("POST /api/mobile/auth/email", () => {
       .post("/api/mobile/auth/email")
       .send({ email: "terreno@gmail.com", password: "correcta" });
 
+    expect(res.status).toBe(403);
+    expect(res.body.success).toBe(false);
+  });
+
+  it("permite usuario Firemat creado en CRM desde el acceso Firemat", async () => {
+    mockFindFirst.mockResolvedValue(USUARIO_FIREMAT);
+    bcryptCompare.mockResolvedValue(true);
+
+    const res = await request(app)
+      .post("/api/mobile/auth/email")
+      .send({ email: USUARIO_FIREMAT.email, password: "correcta", empresa: "firemat" });
+
     expect(res.status).toBe(200);
-    expect(res.body.user.rol).toBe("terreno");
+    expect(res.body.user).toMatchObject({ rol: "bodeguero", empresa: "firemat" });
+  });
+
+  it("impide usar una cuenta Firemat desde el acceso Beck", async () => {
+    mockFindFirst.mockResolvedValue(USUARIO_FIREMAT);
+    bcryptCompare.mockResolvedValue(true);
+
+    const res = await request(app)
+      .post("/api/mobile/auth/email")
+      .send({ email: USUARIO_FIREMAT.email, password: "correcta", empresa: "beck" });
+
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe("EMPRESA_MISMATCH");
+    expect(res.body.empresa).toBe("firemat");
   });
 });
 

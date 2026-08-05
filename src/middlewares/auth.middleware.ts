@@ -2,12 +2,17 @@ import { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
 import { env } from "../config/env";
 import { prisma } from "../config/prisma";
+import {
+  obtenerEmpresaUsuario,
+  type EmpresaApp,
+} from "../services/empresa.service";
 
 export type AppJwtPayload = {
   id: string;
   nombre: string;
   email: string;
   rol: string;
+  empresa: EmpresaApp;
   iat?: number;
   exp?: number;
 };
@@ -62,11 +67,21 @@ export async function verifyAppToken(
       });
     }
 
+    const empresa = obtenerEmpresaUsuario(currentUser.email, currentUser.rol);
+    if (!empresa) {
+      return res.status(401).json({
+        success: false,
+        error: "La cuenta no pertenece a una empresa autorizada",
+        code: "SESSION_COMPANY_INVALID",
+      });
+    }
+
     req.user = {
       ...decoded,
       nombre: currentUser.nombre,
       email: currentUser.email,
       rol: currentUser.rol,
+      empresa,
     };
     next();
   } catch {

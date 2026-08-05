@@ -51,6 +51,7 @@ CLOUDINARY_API_SECRET=tu_api_secret
 
 # PostgreSQL — Requerida (Prisma la lee directamente)
 DATABASE_URL=postgresql://usuario:password@host:5432/beck_db
+FIREMAT_DATABASE_URL=postgresql://usuario:password@host:5432/firemat_db
 DATABASE_SSL=false
 DATABASE_SSL_REJECT_UNAUTHORIZED=false
 DATABASE_POOL_MAX=10
