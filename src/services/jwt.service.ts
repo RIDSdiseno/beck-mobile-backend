@@ -1,12 +1,14 @@
 import jwt, { Secret, SignOptions } from "jsonwebtoken";
 import { randomUUID } from "node:crypto";
 import { env } from "../config/env";
+import type { EmpresaApp } from "./empresa.service";
 
 export type AppJwtPayload = {
   id: string;
   nombre: string;
   email: string;
   rol: string;
+  empresa: EmpresaApp;
 };
 
 export function signAppToken(payload: AppJwtPayload) {

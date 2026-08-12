@@ -11,6 +11,7 @@ import itemizadoOpcionesRoutes from "./routes/itemizadoOpciones.routes";
 import jefeobraRoutes from "./routes/jefeobra.routes";
 import obrasRoutes from "./routes/obras.routes";
 import registrosRoutes from "./routes/registros.routes";
+import firematRoutes from "./routes/firemat.routes";
 
 
 const app = express();
@@ -71,6 +72,7 @@ app.use("/api/itemizado-opciones", itemizadoOpcionesRoutes);
 app.use("/api/jefeobra", jefeobraRoutes);
 app.use("/api/obras", obrasRoutes);
 app.use("/api/registros", registrosRoutes);
+app.use("/api/firemat", firematRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({

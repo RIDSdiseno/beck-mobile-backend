@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { getMisObrasByUser } from "../services/obras.service";
+import { canAccessObra, getMisObrasByUser } from "../services/obras.service";
 import {
   normalizarRolConfiguracion,
   obtenerConfiguracionRegistro,
@@ -61,8 +61,8 @@ export async function getConfiguracionRegistro(req: Request, res: Response) {
       });
     }
 
-    const obrasDisponibles = await getMisObrasByUser(userId, rol);
-    if (!obrasDisponibles.some((obra) => obra.id === obraId)) {
+    const tieneAcceso = await canAccessObra(userId, rol, obraId);
+    if (!tieneAcceso) {
       return res.status(403).json({
         success: false,
         error: "No tienes acceso a la configuracion de esta obra",
