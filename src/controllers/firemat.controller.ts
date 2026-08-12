@@ -1,5 +1,11 @@
 import { Request, Response } from "express";
 import { getFirematPool, withFirematTransaction } from "../config/firematDb";
+import {
+  extractRectorSealSku,
+  isValidGtin,
+  normalizeFirematBarcode,
+  parseUnitsPerBox,
+} from "../services/firematBarcode.service";
 
 type ProductoRow = {
   id: number;
@@ -79,6 +85,18 @@ function firematError(res: Response, error: unknown, message: string) {
       success: false,
       error: "La conexión Firemat no está configurada",
       code: "FIREMAT_NOT_CONFIGURED",
+    });
+  }
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "42P01"
+  ) {
+    return res.status(503).json({
+      success: false,
+      error: "El módulo de escaneo Firemat todavía no está habilitado en la base de datos",
+      code: "FIREMAT_BARCODE_SCHEMA_NOT_CONFIGURED",
     });
   }
   console.error(message, error);
@@ -348,5 +366,249 @@ export async function updateInventarioFiremat(req: Request, res: Response) {
     return res.json({ success: true, data: toProductoDto(result) });
   } catch (error) {
     return firematError(res, error, "No se pudo actualizar el inventario Firemat");
+  }
+}
+
+export async function getProductoPorCodigoBarraFiremat(req: Request, res: Response) {
+  try {
+    const codigo = normalizeFirematBarcode(req.params.codigo);
+    if (!codigo) {
+      return res.status(400).json({ success: false, error: "El código de barras no es válido" });
+    }
+
+    const mapped = await getFirematPool().query<{
+      productoId: number;
+      unidadesPorEscaneo: number;
+      descripcion: string | null;
+    }>(
+      `SELECT "productoId", "unidadesPorEscaneo", descripcion
+         FROM "ProductoCodigoBarra"
+        WHERE codigo = $1 AND activo = TRUE`,
+      [codigo],
+    );
+
+    if (mapped.rowCount === 1) {
+      const product = await getFirematPool().query<ProductoRow>(
+        `${PRODUCT_SELECT} WHERE p.id = $1 AND p.activo = TRUE`,
+        [mapped.rows[0].productoId],
+      );
+      if (product.rowCount !== 1) {
+        return res.json({ success: true, encontrado: false, asociado: false, codigo });
+      }
+      return res.json({
+        success: true,
+        encontrado: true,
+        asociado: true,
+        codigo,
+        unidadesPorEscaneo: mapped.rows[0].unidadesPorEscaneo,
+        descripcion: mapped.rows[0].descripcion,
+        producto: toProductoDto(product.rows[0]),
+      });
+    }
+
+    const skuSugerido = extractRectorSealSku(codigo);
+    if (skuSugerido && isValidGtin(codigo)) {
+      const candidate = await getFirematPool().query<ProductoRow>(
+        `${PRODUCT_SELECT} WHERE p.sku = $1 AND p.activo = TRUE`,
+        [skuSugerido],
+      );
+      if (candidate.rowCount === 1) {
+        return res.json({
+          success: true,
+          encontrado: true,
+          asociado: false,
+          codigo,
+          skuSugerido,
+          unidadesSugeridas: parseUnitsPerBox(candidate.rows[0].cantidadCaja),
+          producto: toProductoDto(candidate.rows[0]),
+        });
+      }
+    }
+
+    return res.json({ success: true, encontrado: false, asociado: false, codigo });
+  } catch (error) {
+    return firematError(res, error, "No se pudo consultar el código de barras Firemat");
+  }
+}
+
+export async function asociarCodigoBarraFiremat(req: Request, res: Response) {
+  try {
+    const codigo = normalizeFirematBarcode(req.body?.codigo);
+    const productoId = parsePositiveId(req.body?.productoId);
+    const unidadesPorEscaneo = parseUnitsPerBox(req.body?.unidadesPorEscaneo);
+    const descripcion =
+      typeof req.body?.descripcion === "string" ? req.body.descripcion.trim().slice(0, 150) || null : null;
+
+    if (!codigo || !productoId || !unidadesPorEscaneo) {
+      return res.status(400).json({
+        success: false,
+        error: "Código, producto y unidades por caja deben ser válidos",
+      });
+    }
+    if (/^\d+$/.test(codigo) && [8, 12, 13, 14].includes(codigo.length) && !isValidGtin(codigo)) {
+      return res.status(400).json({ success: false, error: "El dígito verificador del GTIN no es válido" });
+    }
+
+    const product = await getFirematPool().query<ProductoRow>(
+      `${PRODUCT_SELECT} WHERE p.id = $1 AND p.activo = TRUE`,
+      [productoId],
+    );
+    if (product.rowCount !== 1) {
+      return res.status(404).json({ success: false, error: "Producto no encontrado o inactivo" });
+    }
+
+    await getFirematPool().query(
+      `INSERT INTO "ProductoCodigoBarra"
+         (codigo, "productoId", "unidadesPorEscaneo", descripcion, activo, "createdAt", "updatedAt")
+       VALUES ($1,$2,$3,$4,TRUE,NOW(),NOW())
+       ON CONFLICT (codigo) DO UPDATE SET
+         "productoId" = EXCLUDED."productoId",
+         "unidadesPorEscaneo" = EXCLUDED."unidadesPorEscaneo",
+         descripcion = EXCLUDED.descripcion,
+         activo = TRUE,
+         "updatedAt" = NOW()`,
+      [codigo, productoId, unidadesPorEscaneo, descripcion],
+    );
+
+    return res.status(201).json({
+      success: true,
+      data: {
+        codigo,
+        unidadesPorEscaneo,
+        descripcion,
+        producto: toProductoDto(product.rows[0]),
+      },
+    });
+  } catch (error) {
+    return firematError(res, error, "No se pudo asociar el código de barras Firemat");
+  }
+}
+
+type RecepcionItemInput = { codigo?: unknown; cantidadEscaneos?: unknown };
+
+export async function createRecepcionEscaneoFiremat(req: Request, res: Response) {
+  try {
+    const recepcionId = typeof req.body?.recepcionId === "string" ? req.body.recepcionId.trim() : "";
+    const motivo =
+      typeof req.body?.motivo === "string"
+        ? req.body.motivo.trim().slice(0, 500) || "Recepción por escaneo"
+        : "Recepción por escaneo";
+    const rawItems: RecepcionItemInput[] = Array.isArray(req.body?.items) ? req.body.items : [];
+
+    if (!/^[A-Za-z0-9-]{10,64}$/.test(recepcionId) || rawItems.length === 0 || rawItems.length > 200) {
+      return res.status(400).json({ success: false, error: "La recepción o sus productos no son válidos" });
+    }
+
+    const consolidated = new Map<string, number>();
+    for (const item of rawItems) {
+      const codigo = normalizeFirematBarcode(item.codigo);
+      const cantidadEscaneos = parseUnitsPerBox(item.cantidadEscaneos);
+      if (!codigo || !cantidadEscaneos || cantidadEscaneos > 10_000) {
+        return res.status(400).json({ success: false, error: "Existe una lectura con cantidad inválida" });
+      }
+      consolidated.set(codigo, (consolidated.get(codigo) ?? 0) + cantidadEscaneos);
+    }
+
+    const result = await withFirematTransaction(async (client) => {
+      const inserted = await client.query(
+        `INSERT INTO "RecepcionEscaneo" (id, "usuarioId", motivo, "createdAt")
+         VALUES ($1,$2,$3,NOW()) ON CONFLICT (id) DO NOTHING RETURNING id`,
+        [recepcionId, req.user!.id, motivo],
+      );
+      if (inserted.rowCount === 0) return { duplicada: true, productos: [] as ProductoRow[] };
+
+      const codes = [...consolidated.keys()];
+      const mappings = await client.query<{
+        codigo: string;
+        productoId: number;
+        unidadesPorEscaneo: number;
+      }>(
+        `SELECT codigo, "productoId", "unidadesPorEscaneo"
+           FROM "ProductoCodigoBarra"
+          WHERE codigo = ANY($1::text[]) AND activo = TRUE`,
+        [codes],
+      );
+      if (mappings.rowCount !== codes.length) {
+        throw new Error("FIREMAT_UNMAPPED_BARCODE");
+      }
+
+      const byProduct = new Map<
+        number,
+        { unidades: number; details: Array<{ codigo: string; escaneos: number; unidadesPorEscaneo: number }> }
+      >();
+      for (const mapping of mappings.rows) {
+        const escaneos = consolidated.get(mapping.codigo)!;
+        const current = byProduct.get(mapping.productoId) ?? { unidades: 0, details: [] };
+        current.unidades += escaneos * mapping.unidadesPorEscaneo;
+        current.details.push({ codigo: mapping.codigo, escaneos, unidadesPorEscaneo: mapping.unidadesPorEscaneo });
+        byProduct.set(mapping.productoId, current);
+      }
+
+      const productIds = [...byProduct.keys()].sort((a, b) => a - b);
+      const updatedProducts: ProductoRow[] = [];
+      for (const productoId of productIds) {
+        const entry = byProduct.get(productoId)!;
+        const current = await client.query<{ stock: number }>(
+          `SELECT stock FROM "Producto" WHERE id = $1 AND activo = TRUE FOR UPDATE`,
+          [productoId],
+        );
+        if (current.rowCount !== 1) throw new Error("FIREMAT_PRODUCT_NOT_AVAILABLE");
+
+        const stockAnterior = current.rows[0].stock;
+        const stockNuevo = stockAnterior + entry.unidades;
+        await client.query(
+          `UPDATE "Producto"
+              SET stock = $1,
+                  entradas = COALESCE(entradas, 0) + $2,
+                  "fechaUltimaEntrada" = NOW()
+            WHERE id = $3`,
+          [stockNuevo, entry.unidades, productoId],
+        );
+        await client.query(
+          `INSERT INTO "Movimiento"
+             (tipo, cantidad, "stockAnterior", "stockNuevo", motivo, documento, "productoId", "createdAt")
+           VALUES ('ENTRADA_ESCANEO',$1,$2,$3,$4,$5,$6,NOW())`,
+          [entry.unidades, stockAnterior, stockNuevo, motivo, `escaneo:${recepcionId}`, productoId],
+        );
+        for (const detail of entry.details) {
+          await client.query(
+            `INSERT INTO "RecepcionEscaneoDetalle"
+               ("recepcionId", "productoId", codigo, "cantidadEscaneos", "unidadesPorEscaneo",
+                "unidadesIngresadas", "stockAnterior", "stockNuevo", "createdAt")
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())`,
+            [
+              recepcionId,
+              productoId,
+              detail.codigo,
+              detail.escaneos,
+              detail.escaneos * detail.unidadesPorEscaneo,
+              stockAnterior,
+              stockNuevo,
+            ],
+          );
+        }
+        const product = await client.query<ProductoRow>(`${PRODUCT_SELECT} WHERE p.id = $1`, [productoId]);
+        updatedProducts.push(product.rows[0]);
+      }
+      return { duplicada: false, productos: updatedProducts };
+    });
+
+    return res.status(result.duplicada ? 200 : 201).json({
+      success: true,
+      duplicada: result.duplicada,
+      data: result.productos.map(toProductoDto),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "FIREMAT_UNMAPPED_BARCODE") {
+      return res.status(409).json({
+        success: false,
+        error: "Uno de los códigos ya no está asociado a un producto",
+        code: "FIREMAT_UNMAPPED_BARCODE",
+      });
+    }
+    if (error instanceof Error && error.message === "FIREMAT_PRODUCT_NOT_AVAILABLE") {
+      return res.status(409).json({ success: false, error: "Uno de los productos ya no está disponible" });
+    }
+    return firematError(res, error, "No se pudo registrar la recepción Firemat");
   }
 }
