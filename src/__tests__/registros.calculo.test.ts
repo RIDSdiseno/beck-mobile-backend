@@ -109,7 +109,7 @@ describe("createRegistro usa el cálculo autoritativo", () => {
       request.body.obraId,
       expect.objectContaining({
         cantidad_sellos: 3,
-        holgura: 1.2,
+        holgura: 4,
         accesibilidad: 2,
         aislacion: 1.3,
         reparacion_tabique: 1,
@@ -117,6 +117,7 @@ describe("createRegistro usa el cálculo autoritativo", () => {
     );
     expect(mockCreateRegistro).toHaveBeenCalledWith({
       data: expect.objectContaining({
+        holgura: 4,
         factor_por_holguras: 1,
         cantidad_sellos_con_factores: 6,
         aislacion: 1.3,

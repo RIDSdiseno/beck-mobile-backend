@@ -13,6 +13,7 @@ import {
 } from "../services/configuracionCamposRegistro.service";
 import { eliminarRegistroIncompleto } from "../services/registrosIncompletos.service";
 import { canAccessObra } from "../services/obras.service";
+import { normalizarHolguraMovil } from "../utils/normalizarHolguraMovil";
 
 function getDiaSemana(fecha: Date) {
   const dias = [
@@ -321,7 +322,7 @@ export async function createRegistro(req: Request, res: Response) {
       : parsePositiveInteger(cantidadSellos, "cantidadSellos");
     const holguraParsed = isJuntaLineal
       ? { value: 0, error: null }
-      : parseNonNegativeNumber(holguraInput, "holgura");
+      : parseNonNegativeNumber(normalizarHolguraMovil(holguraInput), "holgura");
     const accesibilidadParsed = isJuntaLineal
       ? { value: null, error: null }
       : parseOptionalNonNegativeNumber(accesibilidadInput, "accesibilidad");
@@ -941,7 +942,10 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
       : parsePositiveInteger(cantidadSellos ?? currentRegistro.cantidad_sellos, "cantidadSellos");
     const holguraParsed = isJuntaLineal
       ? { value: 0, error: null }
-      : parseNonNegativeNumber(holguraInput ?? currentRegistro.holgura, "holgura");
+      : parseNonNegativeNumber(
+          normalizarHolguraMovil(holguraInput ?? currentRegistro.holgura),
+          "holgura",
+        );
     const accesibilidadParsed = isJuntaLineal
       ? { value: null, error: null }
       : parseOptionalNonNegativeNumber(
@@ -1434,7 +1438,10 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
         );
     const holguraParsed = isJuntaLineal
       ? { value: 0, error: null }
-      : parseNonNegativeNumber(holguraInput ?? currentRegistro.holgura, "holgura");
+      : parseNonNegativeNumber(
+          normalizarHolguraMovil(holguraInput ?? currentRegistro.holgura),
+          "holgura",
+        );
     const accesibilidadParsed = isJuntaLineal
       ? { value: null, error: null }
       : parseOptionalNonNegativeNumber(
