@@ -404,7 +404,7 @@ model registros_terreno {
   itemizados_mandante                                                 itemizados_mandante?      @relation(fields: [itemizado_mandante_id], references: [id])
   obras                                                               obras                     @relation(fields: [obra_id], references: [id], onDelete: Cascade)
   usuarios_registros_terreno_rechazado_por_idTousuarios               usuarios?                 @relation("registros_terreno_rechazado_por_idTousuarios", fields: [rechazado_por_id], references: [id])
-  usuarios_registros_terreno_enviado_ingenieria_por_idTousuarios      usuarios?                 @relation("registros_terreno_enviado_ingenieria_por_idTousuarios", fields: [enviado_ingenieria_por_id], references: [id])
+  usuarios_registros_terreno_enviado_ingenieria_por_idTousuarios      usuarios?                 @relation("registros_terreno_enviado_ingenieria_por_idTousuarios", fields: [enviado_ingenieria_por_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   registros_terreno                                                   registros_terreno?        @relation("registros_terrenoToregistros_terreno", fields: [registro_origen_id], references: [id])
   other_registros_terreno                                             registros_terreno[]       @relation("registros_terrenoToregistros_terreno")
   usuarios_registros_terreno_seleccionado_inspeccion_por_idTousuarios usuarios?                 @relation("registros_terreno_seleccionado_inspeccion_por_idTousuarios", fields: [seleccionado_inspeccion_por_id], references: [id])
