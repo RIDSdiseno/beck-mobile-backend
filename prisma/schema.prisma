@@ -378,6 +378,8 @@ model registros_terreno {
   motivo_rechazo                                                      String?
   rechazado_por_id                                                    String?                   @db.Uuid
   reenviado_revision_at                                               DateTime?                 @db.Timestamp(6)
+  enviado_ingenieria_at                                               DateTime?                 @db.Timestamp(6)
+  enviado_ingenieria_por_id                                           String?                   @db.Uuid
   es_correccion                                                       Boolean                   @default(false)
   registro_origen_id                                                  String?                   @db.Uuid
   fecha_seleccion_inspeccion                                          DateTime?                 @db.Timestamp(6)
@@ -402,6 +404,7 @@ model registros_terreno {
   itemizados_mandante                                                 itemizados_mandante?      @relation(fields: [itemizado_mandante_id], references: [id])
   obras                                                               obras                     @relation(fields: [obra_id], references: [id], onDelete: Cascade)
   usuarios_registros_terreno_rechazado_por_idTousuarios               usuarios?                 @relation("registros_terreno_rechazado_por_idTousuarios", fields: [rechazado_por_id], references: [id])
+  usuarios_registros_terreno_enviado_ingenieria_por_idTousuarios      usuarios?                 @relation("registros_terreno_enviado_ingenieria_por_idTousuarios", fields: [enviado_ingenieria_por_id], references: [id])
   registros_terreno                                                   registros_terreno?        @relation("registros_terrenoToregistros_terreno", fields: [registro_origen_id], references: [id])
   other_registros_terreno                                             registros_terreno[]       @relation("registros_terrenoToregistros_terreno")
   usuarios_registros_terreno_seleccionado_inspeccion_por_idTousuarios usuarios?                 @relation("registros_terreno_seleccionado_inspeccion_por_idTousuarios", fields: [seleccionado_inspeccion_por_id], references: [id])
@@ -417,6 +420,8 @@ model registros_terreno {
   @@index([itemizado_mandante_id])
   @@index([es_correccion])
   @@index([rechazado_por_id])
+  @@index([enviado_ingenieria_por_id])
+  @@index([enviado_ingenieria_at])
   @@index([registro_origen_id])
   @@index([seleccionado_inspeccion_por_id])
   @@index([seleccionado_para_inspeccion])
@@ -494,6 +499,7 @@ model usuarios {
   procesamiento_ingenieria                                                     procesamiento_ingenieria[]
   registros_terreno_registros_terreno_inspeccion_revision_por_idTousuarios     registros_terreno[]                   @relation("registros_terreno_inspeccion_revision_por_idTousuarios")
   registros_terreno_registros_terreno_rechazado_por_idTousuarios               registros_terreno[]                   @relation("registros_terreno_rechazado_por_idTousuarios")
+  registros_terreno_registros_terreno_enviado_ingenieria_por_idTousuarios      registros_terreno[]                   @relation("registros_terreno_enviado_ingenieria_por_idTousuarios")
   registros_terreno_registros_terreno_seleccionado_inspeccion_por_idTousuarios registros_terreno[]                   @relation("registros_terreno_seleccionado_inspeccion_por_idTousuarios")
   registros_terreno                                                            registros_terreno[]
   registros_terreno_registros_terreno_validado_cliente_por_idTousuarios        registros_terreno[]                   @relation("registros_terreno_validado_cliente_por_idTousuarios")

@@ -6,6 +6,7 @@ import {
   deleteRegistroPendiente,
   devolverRegistroATecnico,
   getMisRegistros,
+  getResumenSupervisor,
   updateRegistroJefeObra,
   updateRegistroObservaciones,
   updateRegistroTecnico,
@@ -15,6 +16,12 @@ import {
 const router = Router();
 
 router.get("/mis-registros", verifyAppToken, getMisRegistros);
+router.get(
+  "/resumen-supervisor",
+  verifyAppToken,
+  checkRole("jefeobra", "administrador"),
+  getResumenSupervisor,
+);
 router.post(
   "/",
   verifyAppToken,

@@ -114,6 +114,18 @@ function isAdmin(role: string | undefined) {
   return role === "administrador";
 }
 
+async function seguimientoSupervisorDisponible() {
+  const columnas = await prisma.$queryRaw<{ column_name: string }[]>`
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'registros_terreno'
+      AND column_name IN ('enviado_ingenieria_at', 'enviado_ingenieria_por_id')
+  `;
+
+  return columnas.length === 2;
+}
+
 async function canModifyRegistro(
   userId: string,
   role: string | undefined,
@@ -612,6 +624,137 @@ export async function getMisRegistros(req: Request, res: Response) {
     return res.status(500).json({
       success: false,
       error: "No se pudieron obtener los registros",
+    });
+  }
+}
+
+export async function getResumenSupervisor(req: Request, res: Response) {
+  try {
+    const userId = req.user?.id;
+    const userRole = req.user?.rol;
+    const tipoRegistro =
+      typeof req.query.tipoRegistro === "string"
+        ? req.query.tipoRegistro
+        : "sello_cortafuego";
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: "Usuario no autenticado",
+      });
+    }
+
+    if (userRole !== "jefeobra" && !isAdmin(userRole)) {
+      return res.status(403).json({
+        success: false,
+        error: "Solo jefe de obra puede consultar este resumen",
+      });
+    }
+
+    if (!["sello_cortafuego", "junta_lineal_espuma"].includes(tipoRegistro)) {
+      return res.status(400).json({
+        success: false,
+        error: "tipoRegistro no válido",
+      });
+    }
+
+    const baseWhere = {
+      carga_completa: true,
+      tipo_registro: tipoRegistro,
+      obras: {
+        estado: {
+          in: [EstadoObra.activa, EstadoObra.pausada],
+        },
+      },
+      usuarios: {
+        rol: "terreno" as const,
+      },
+    };
+    const now = new Date();
+    const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
+    const seguimientoPersonalDisponible = await seguimientoSupervisorDisponible();
+
+    const [pendientesRevision, rechazadosIngenieria] = await prisma.$transaction([
+      prisma.registros_terreno.count({
+        where: {
+          ...baseWhere,
+          estado: EstadoRegistroTerreno.pendiente,
+          devuelto_a_tecnico: false,
+        },
+      }),
+      prisma.registros_terreno.count({
+        where: {
+          ...baseWhere,
+          estado: EstadoRegistroTerreno.pendiente,
+          es_correccion: true,
+          devuelto_a_tecnico: true,
+        },
+      }),
+    ]);
+
+    let enRevisionIngenieria: number | null = null;
+    let validadosIngenieria: number | null = null;
+    let enviadosMes: number | null = null;
+    let correccionesReenviadasMes: number | null = null;
+
+    if (seguimientoPersonalDisponible) {
+      [
+        enRevisionIngenieria,
+        validadosIngenieria,
+        enviadosMes,
+        correccionesReenviadasMes,
+      ] = await prisma.$transaction([
+        prisma.registros_terreno.count({
+        where: {
+          ...baseWhere,
+          estado: EstadoRegistroTerreno.en_revision,
+          enviado_ingenieria_por_id: userId,
+        },
+        }),
+        prisma.registros_terreno.count({
+        where: {
+          ...baseWhere,
+          estado: EstadoRegistroTerreno.validado,
+          enviado_ingenieria_por_id: userId,
+        },
+        }),
+        prisma.registros_terreno.count({
+        where: {
+          ...baseWhere,
+          enviado_ingenieria_por_id: userId,
+          enviado_ingenieria_at: { gte: inicioMes },
+        },
+        }),
+        prisma.registros_terreno.count({
+        where: {
+          ...baseWhere,
+          es_correccion: true,
+          enviado_ingenieria_por_id: userId,
+          enviado_ingenieria_at: { gte: inicioMes },
+        },
+        }),
+      ]);
+    }
+
+    return res.json({
+      success: true,
+      data: {
+        pendientesRevision,
+        rechazadosIngenieria,
+        enRevisionIngenieria,
+        validadosIngenieria,
+        enviadosMes,
+        correccionesReenviadasMes,
+        seguimientoPersonalDisponible,
+      },
+    });
+  } catch (error) {
+    console.error("GET RESUMEN SUPERVISOR ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "No se pudo obtener el resumen del supervisor",
     });
   }
 }
@@ -1317,6 +1460,7 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
           tipoRegistro: normalizedTipoRegistro,
         });
 
+    const puedeRegistrarEnvio = await seguimientoSupervisorDisponible();
     const transition = await prisma.registros_terreno.updateMany({
       where: {
         id: registroId,
@@ -1380,6 +1524,12 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
         tipo_registro: normalizedTipoRegistro,
         estado: "en_revision",
         devuelto_a_tecnico: false,
+        ...(puedeRegistrarEnvio
+          ? {
+              enviado_ingenieria_por_id: userId,
+              enviado_ingenieria_at: new Date(),
+            }
+          : {}),
         updated_at: new Date(),
       },
     });
