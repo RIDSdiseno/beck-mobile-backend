@@ -705,8 +705,11 @@ export async function getResumenSupervisor(req: Request, res: Response) {
         where: {
           ...baseWhere,
           estado: EstadoRegistroTerreno.pendiente,
-          es_correccion: false,
           devuelto_a_tecnico: false,
+          OR: [
+            { es_correccion: false },
+            { es_correccion: true, corregido_at: { not: null } },
+          ],
         },
       }),
       prisma.registros_terreno.count({
@@ -714,6 +717,7 @@ export async function getResumenSupervisor(req: Request, res: Response) {
           ...baseWhere,
           estado: EstadoRegistroTerreno.pendiente,
           es_correccion: true,
+          corregido_at: null,
         },
       }),
     ]);
