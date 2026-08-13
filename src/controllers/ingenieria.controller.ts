@@ -914,7 +914,8 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
           estado: EstadoRegistroTerreno.pendiente,
           metros_lineales: currentRegistro.metros_lineales,
           tipo_registro: currentRegistro.tipo_registro,
-          devuelto_a_tecnico: true,
+          devuelto_a_tecnico: false,
+          corregido_at: null,
           codigo_beck: currentRegistro.codigo_beck,
           itemizado_mandante_id: currentRegistro.itemizado_mandante_id,
           itemizado_beck: currentRegistro.itemizado_beck,
@@ -934,6 +935,8 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
           folio: currentRegistro.folio,
           es_correccion: true,
           registro_origen_id: registroId,
+          enviado_ingenieria_por_id: currentRegistro.enviado_ingenieria_por_id,
+          enviado_ingenieria_at: currentRegistro.enviado_ingenieria_at,
         },
       });
 

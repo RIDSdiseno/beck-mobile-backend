@@ -454,10 +454,21 @@ export async function getMisRegistros(req: Request, res: Response) {
       });
     }
 
+    const visibilidadTerreno = {
+      OR: [
+        { es_correccion: false },
+        { es_correccion: true, devuelto_a_tecnico: true },
+        { es_correccion: true, corregido_at: { not: null } },
+        { estado: { not: EstadoRegistroTerreno.pendiente } },
+      ],
+    };
     const where =
       userRole === "jefeobra"
         ? {
             carga_completa: true,
+            ...(scope === "historial"
+              ? { enviado_ingenieria_por_id: userId }
+              : {}),
             ...(obraId ? { obra_id: obraId } : {}),
             ...(estado ? { estado: estado as EstadoRegistroTerreno } : {}),
             obras: {
@@ -473,10 +484,24 @@ export async function getMisRegistros(req: Request, res: Response) {
             carga_completa: true,
             usuario_id: userId,
             ...(estado ? { estado: estado as EstadoRegistroTerreno } : {}),
+            ...(userRole === "terreno" ? { AND: [visibilidadTerreno] } : {}),
             ...(scope === "registro"
               ? {
                   OR: [
-                    { estado: "pendiente" as const },
+                    {
+                      estado: "pendiente" as const,
+                      es_correccion: false,
+                    },
+                    {
+                      estado: "pendiente" as const,
+                      es_correccion: true,
+                      devuelto_a_tecnico: true,
+                    },
+                    {
+                      estado: "pendiente" as const,
+                      es_correccion: true,
+                      corregido_at: { not: null },
+                    },
                     {
                       estado: "rechazado" as const,
                       devuelto_a_tecnico: true,
@@ -680,6 +705,7 @@ export async function getResumenSupervisor(req: Request, res: Response) {
         where: {
           ...baseWhere,
           estado: EstadoRegistroTerreno.pendiente,
+          es_correccion: false,
           devuelto_a_tecnico: false,
         },
       }),
@@ -688,7 +714,6 @@ export async function getResumenSupervisor(req: Request, res: Response) {
           ...baseWhere,
           estado: EstadoRegistroTerreno.pendiente,
           es_correccion: true,
-          devuelto_a_tecnico: true,
         },
       }),
     ]);
@@ -1027,6 +1052,7 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
         tipo_registro: normalizedTipoRegistro,
         estado: "pendiente",
         devuelto_a_tecnico: false,
+        corregido_at: new Date(),
         updated_at: new Date(),
       },
     });
@@ -1116,10 +1142,15 @@ export async function devolverRegistroATecnico(req: Request, res: Response) {
       });
     }
 
-    if (currentRegistro.estado !== "rechazado") {
+    const esCorreccionPendienteSupervisor =
+      currentRegistro.estado === EstadoRegistroTerreno.pendiente &&
+      currentRegistro.es_correccion &&
+      !currentRegistro.devuelto_a_tecnico;
+
+    if (!esCorreccionPendienteSupervisor) {
       return res.status(400).json({
         success: false,
-        error: "Solo se pueden enviar al técnico registros rechazados",
+        error: "Solo se pueden enviar al operario correcciones pendientes del supervisor",
       });
     }
 
@@ -1137,12 +1168,14 @@ export async function devolverRegistroATecnico(req: Request, res: Response) {
     const transition = await prisma.registros_terreno.updateMany({
       where: {
         id: registroId,
-        estado: EstadoRegistroTerreno.rechazado,
+        estado: EstadoRegistroTerreno.pendiente,
+        es_correccion: true,
+        devuelto_a_tecnico: false,
         carga_completa: true,
       },
       data: {
-        estado: "rechazado",
         devuelto_a_tecnico: true,
+        corregido_at: null,
         updated_at: new Date(),
       },
     });
