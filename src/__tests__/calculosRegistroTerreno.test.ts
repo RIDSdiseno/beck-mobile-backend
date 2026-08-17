@@ -1,6 +1,7 @@
 import {
   calcularCamposRegistroTerreno,
   getTramosHolguraPorDefecto,
+  resolveEstadoAislacionDesdeFactor,
 } from "../utils/calculosRegistroTerreno";
 
 describe("calcularCamposRegistroTerreno", () => {
@@ -62,6 +63,72 @@ describe("calcularCamposRegistroTerreno", () => {
     expect(result.factor_por_holguras).toBe(1.75);
     expect(result.cantidad_sellos_con_factores).toBe(7);
     expect(result.cantidad_final).toBe(7);
+  });
+
+  it("resuelve accesibilidad y aislación con los factores de la obra", () => {
+    const result = calcularCamposRegistroTerreno({
+      cantidad_sellos: 2,
+      holgura: 4,
+      accesibilidad: 2,
+      aislacion: true,
+      reparacion_tabique: false,
+      piso: "1",
+      tipoRegistro: "sello_cortafuego",
+      factoresAccesibilidad: [
+        { nivel: 1, factor: 1 },
+        { nivel: 2, factor: 1.5 },
+        { nivel: 3, factor: 2.25 },
+      ],
+      factoresAislacion: [
+        { aplica: true, factor: 1.4 },
+        { aplica: false, factor: 1 },
+      ],
+    });
+
+    expect(result.factor_por_holguras).toBe(1.2);
+    expect(result.cantidad_sellos_con_factores).toBeCloseTo(3.6);
+    expect(result.aislacion_normalizada).toBe(1.4);
+    expect(result.cantidad_final).toBeCloseTo(5.04);
+  });
+
+  it("usa factor neutro cuando holgura y accesibilidad no aplican", () => {
+    const result = calcularCamposRegistroTerreno({
+      cantidad_sellos: 3,
+      holgura: 0,
+      accesibilidad: 0,
+      aislacion: false,
+      reparacion_tabique: false,
+      piso: "1",
+      tipoRegistro: "sello_cortafuego",
+      tramosHolgura: [
+        { holguraMax: 2, factor: 1.7 },
+        { holguraMax: 4, factor: 2 },
+      ],
+      factoresAccesibilidad: [
+        { nivel: 1, factor: 1.4 },
+        { nivel: 2, factor: 2 },
+        { nivel: 3, factor: 3 },
+      ],
+      factoresAislacion: [
+        { aplica: true, factor: 1.3 },
+        { aplica: false, factor: 1 },
+      ],
+    });
+
+    expect(result.factor_por_holguras).toBe(1);
+    expect(result.cantidad_sellos_con_factores).toBe(3);
+    expect(result.cantidad_final).toBe(3);
+  });
+
+  it("recupera el estado de aislación desde los factores efectivos", () => {
+    const factores = [
+      { aplica: true, factor: 1.45 },
+      { aplica: false, factor: 1.05 },
+    ];
+
+    expect(resolveEstadoAislacionDesdeFactor(1.45, factores)).toBe(true);
+    expect(resolveEstadoAislacionDesdeFactor(1.05, factores)).toBe(false);
+    expect(resolveEstadoAislacionDesdeFactor(2, factores)).toBeNull();
   });
 
   it("mantiene la tabla oficial por defecto", () => {

@@ -3,6 +3,16 @@ export interface TramoHolgura {
   factor: number;
 }
 
+export interface FactorAccesibilidadNivel {
+  nivel: number;
+  factor: number;
+}
+
+export interface FactorAislacionEstado {
+  aplica: boolean;
+  factor: number;
+}
+
 export interface CalcRegistroInput {
   cantidad_sellos: number;
   holgura: number;
@@ -12,6 +22,8 @@ export interface CalcRegistroInput {
   piso: string;
   tipoRegistro: string;
   tramosHolgura?: TramoHolgura[];
+  factoresAccesibilidad?: FactorAccesibilidadNivel[];
+  factoresAislacion?: FactorAislacionEstado[];
 }
 
 export interface CalcRegistroResult {
@@ -49,6 +61,8 @@ function resolveHolguraFactor(
   holgura: number,
   tramos: TramoHolgura[]
 ): number {
+  if (holgura === 0) return 1;
+
   const ordenados = [...tramos].sort((a, b) => a.holguraMax - b.holguraMax);
 
   for (const tramo of ordenados) {
@@ -58,36 +72,95 @@ function resolveHolguraFactor(
   throw new Error("CORREGIR HOLGURA");
 }
 
-function resolveAccesibilidadFactor(accesibilidad: unknown): number {
-  if (accesibilidad === null || accesibilidad === undefined) return 1;
+export function getFactoresAccesibilidadPorDefecto(): FactorAccesibilidadNivel[] {
+  return [1, 2, 3].map((nivel) => ({ nivel, factor: nivel }));
+}
+
+function buscarFactorAccesibilidad(
+  nivel: number,
+  factores: FactorAccesibilidadNivel[],
+): number {
+  return factores.find((item) => item.nivel === nivel)?.factor ?? nivel;
+}
+
+export function resolveAccesibilidadFactor(
+  accesibilidad: unknown,
+  factoresAccesibilidad?: FactorAccesibilidadNivel[],
+): number {
+  const factores =
+    factoresAccesibilidad ?? getFactoresAccesibilidadPorDefecto();
+  const esNivel = (value: number) =>
+    Number.isInteger(value) && value >= 1 && value <= 3;
+
+  if (accesibilidad === null || accesibilidad === undefined) {
+    return buscarFactorAccesibilidad(1, factores);
+  }
   if (typeof accesibilidad === "number" && Number.isFinite(accesibilidad)) {
-    return accesibilidad;
+    if (accesibilidad === 0) return 1;
+    return esNivel(accesibilidad)
+      ? buscarFactorAccesibilidad(accesibilidad, factores)
+      : accesibilidad;
   }
 
   const value = String(accesibilidad).trim();
   const parsed = Number.parseFloat(value.replace(",", "."));
-  if (Number.isFinite(parsed)) return parsed;
+  if (Number.isFinite(parsed)) {
+    if (parsed === 0) return 1;
+    return esNivel(parsed)
+      ? buscarFactorAccesibilidad(parsed, factores)
+      : parsed;
+  }
 
   const normalized = value
     .toLowerCase()
     .normalize("NFD")
     .replace(/\p{Mn}/gu, "");
 
-  if (normalized === "normal") return 1;
-  if (normalized.includes("cielo") && normalized.includes("duro")) return 3;
+  if (normalized === "no aplica") return 1;
+  if (normalized === "normal") return buscarFactorAccesibilidad(1, factores);
+  if (normalized.includes("cielo") && normalized.includes("duro")) {
+    return buscarFactorAccesibilidad(3, factores);
+  }
   if (
     normalized.includes("cielo") &&
     (normalized.includes("americano") || normalized.includes("estructurado"))
   ) {
-    return 2;
+    return buscarFactorAccesibilidad(2, factores);
   }
-  if (normalized.includes("gateras")) return 3;
-  return 1;
+  if (normalized.includes("gateras")) {
+    return buscarFactorAccesibilidad(3, factores);
+  }
+  return buscarFactorAccesibilidad(1, factores);
 }
 
-function resolveAislacionFactor(aislacion: unknown): number {
-  if (aislacion === null || aislacion === undefined || aislacion === "") return 1;
-  if (typeof aislacion === "boolean") return aislacion ? 1.3 : 1;
+export function getFactoresAislacionPorDefecto(): FactorAislacionEstado[] {
+  return [
+    { aplica: true, factor: 1.3 },
+    { aplica: false, factor: 1 },
+  ];
+}
+
+function buscarFactorAislacion(
+  aplica: boolean,
+  factores: FactorAislacionEstado[],
+): number {
+  return (
+    factores.find((item) => item.aplica === aplica)?.factor ??
+    (aplica ? 1.3 : 1)
+  );
+}
+
+export function resolveAislacionFactor(
+  aislacion: unknown,
+  factoresAislacion?: FactorAislacionEstado[],
+): number {
+  const factores = factoresAislacion ?? getFactoresAislacionPorDefecto();
+  if (aislacion === null || aislacion === undefined || aislacion === "") {
+    return buscarFactorAislacion(false, factores);
+  }
+  if (typeof aislacion === "boolean") {
+    return buscarFactorAislacion(aislacion, factores);
+  }
   if (typeof aislacion === "number") return aislacion;
 
   const value = String(aislacion).trim();
@@ -99,7 +172,25 @@ function resolveAislacionFactor(aislacion: unknown): number {
     .normalize("NFD")
     .replace(/\p{Mn}/gu, "");
 
-  return normalized === "APLICA" || normalized === "SI" ? 1.3 : 1;
+  return buscarFactorAislacion(
+    normalized === "APLICA" || normalized === "SI",
+    factores,
+  );
+}
+
+export function resolveEstadoAislacionDesdeFactor(
+  factorInput: unknown,
+  factoresAislacion?: FactorAislacionEstado[],
+): boolean | null {
+  const factor = Number(factorInput);
+  if (!Number.isFinite(factor)) return null;
+
+  const factores = factoresAislacion ?? getFactoresAislacionPorDefecto();
+  const aplica = factores.find((item) => Math.abs(item.factor - factor) < 0.005);
+  const coincidencias = factores.filter(
+    (item) => Math.abs(item.factor - factor) < 0.005,
+  );
+  return coincidencias.length === 1 ? aplica?.aplica ?? null : null;
 }
 
 function resolveReparacionTabique(reparacion: unknown): boolean {
@@ -131,8 +222,14 @@ export function calcularCamposRegistroTerreno(
   const tramos =
     input.tramosHolgura ?? getTramosHolguraPorDefecto(input.tipoRegistro);
   const factor_por_holguras = resolveHolguraFactor(input.holgura, tramos);
-  const accesibilidadFactor = resolveAccesibilidadFactor(input.accesibilidad);
-  const aislacion_normalizada = resolveAislacionFactor(input.aislacion);
+  const accesibilidadFactor = resolveAccesibilidadFactor(
+    input.accesibilidad,
+    input.factoresAccesibilidad,
+  );
+  const aislacion_normalizada = resolveAislacionFactor(
+    input.aislacion,
+    input.factoresAislacion,
+  );
   const aplicaReparacion = resolveReparacionTabique(input.reparacion_tabique);
   const esSotano = input.piso === "-1";
 

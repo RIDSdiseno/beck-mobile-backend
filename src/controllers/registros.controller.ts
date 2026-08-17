@@ -6,7 +6,10 @@ import {
   uploadBufferToCloudinary,
   withPrivateImageUrl,
 } from "../services/cloudinary.service";
-import { calcularCamposConConfiguracion } from "../services/calculosRegistroTerreno.service";
+import {
+  calcularCamposConConfiguracion,
+  getFactoresAislacionObra,
+} from "../services/calculosRegistroTerreno.service";
 import {
   crearMapaVisibilidad,
   obtenerConfiguracionRegistro,
@@ -14,6 +17,7 @@ import {
 import { eliminarRegistroIncompleto } from "../services/registrosIncompletos.service";
 import { canAccessObra } from "../services/obras.service";
 import { normalizarHolguraMovil } from "../utils/normalizarHolguraMovil";
+import { resolveEstadoAislacionDesdeFactor } from "../utils/calculosRegistroTerreno";
 
 function getDiaSemana(fecha: Date) {
   const dias = [
@@ -109,6 +113,24 @@ function parseOptionalNonNegativeNumber(value: unknown, fieldName: string) {
   }
 
   return parseNonNegativeNumber(value, fieldName);
+}
+
+function parseAccesibilidadNivel(value: unknown) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 3) {
+    return {
+      value: null,
+      error: "accesibilidad debe ser 0 (No aplica) o uno de los niveles 1, 2 o 3",
+    };
+  }
+
+  return { value: parsed, error: null };
+}
+
+function normalizarEstadoAislacionMovil(value: number | null) {
+  if (value === 1) return true;
+  if (value === 0) return false;
+  return value;
 }
 
 function isAdmin(role: string | undefined) {
@@ -282,7 +304,7 @@ export async function createRegistro(req: Request, res: Response) {
     const holguraInput = isJuntaLineal || !esVisible("holgura") ? 0 : holgura;
     const accesibilidadInput =
       isJuntaLineal || !esVisible("accesibilidad")
-        ? 1
+        ? 0
         : accesibilidad ?? cieloModular;
     const aislacionInput =
       isJuntaLineal || !esVisible("aislacion") ? null : aislacion;
@@ -325,7 +347,7 @@ export async function createRegistro(req: Request, res: Response) {
       : parseNonNegativeNumber(normalizarHolguraMovil(holguraInput), "holgura");
     const accesibilidadParsed = isJuntaLineal
       ? { value: null, error: null }
-      : parseOptionalNonNegativeNumber(accesibilidadInput, "accesibilidad");
+      : parseAccesibilidadNivel(accesibilidadInput);
     const metrosLinealesParsed = isJuntaLineal
       ? parsePositiveNumber(metrosLineales, "longitud")
       : { value: null, error: null };
@@ -357,7 +379,7 @@ export async function createRegistro(req: Request, res: Response) {
           cantidad_sellos: cantidadSellosParsed.value!,
           holgura: holguraParsed.value!,
           accesibilidad: accesibilidadParsed.value ?? 1,
-          aislacion: aislacionParsed.value,
+          aislacion: normalizarEstadoAislacionMovil(aislacionParsed.value),
           reparacion_tabique: reparacionTabiqueParsed.value,
           piso: normalizeText(piso),
           tipoRegistro: normalizedTipoRegistro,
@@ -583,6 +605,14 @@ export async function getMisRegistros(req: Request, res: Response) {
       },
     });
 
+    const factoresAislacionPorObra = new Map(
+      await Promise.all(
+        [...new Set(registros.map((registro) => registro.obra_id))].map(
+          async (id) => [id, await getFactoresAislacionObra(id)] as const,
+        ),
+      ),
+    );
+
     const normalizeRegistroFotos = (registro: {
       id: string;
       foto_url?: string | null;
@@ -637,6 +667,10 @@ export async function getMisRegistros(req: Request, res: Response) {
 
         return {
           ...registro,
+          aislacion_aplica: resolveEstadoAislacionDesdeFactor(
+            registro.aislacion,
+            factoresAislacionPorObra.get(registro.obra_id),
+          ),
           fotos: normalizeRegistroFotos(registro),
           rechazado_por:
             registro.usuarios_registros_terreno_rechazado_por_idTousuarios,
@@ -948,9 +982,8 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
         );
     const accesibilidadParsed = isJuntaLineal
       ? { value: null, error: null }
-      : parseOptionalNonNegativeNumber(
+      : parseAccesibilidadNivel(
           accesibilidadInput ?? currentRegistro.accesibilidad,
-          "accesibilidad"
         );
     const metrosLinealesParsed = isJuntaLineal
       ? parsePositiveNumber(metrosLineales ?? currentRegistro.metros_lineales, "longitud")
@@ -986,7 +1019,7 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
     const aislacionFinal = isJuntaLineal
       ? null
       : aislacionInput !== undefined
-        ? aislacionParsed.value
+        ? normalizarEstadoAislacionMovil(aislacionParsed.value)
         : currentRegistro.aislacion;
     const reparacionFinal = isJuntaLineal
       ? null
@@ -1444,9 +1477,8 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
         );
     const accesibilidadParsed = isJuntaLineal
       ? { value: null, error: null }
-      : parseOptionalNonNegativeNumber(
+      : parseAccesibilidadNivel(
           accesibilidadInput ?? currentRegistro.accesibilidad,
-          "accesibilidad"
         );
     const metrosLinealesParsed = isJuntaLineal
       ? parsePositiveNumber(
@@ -1485,7 +1517,7 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
     const aislacionFinal = isJuntaLineal
       ? null
       : aislacionInput !== undefined
-        ? aislacionParsed.value
+        ? normalizarEstadoAislacionMovil(aislacionParsed.value)
         : currentRegistro.aislacion;
     const reparacionFinal = isJuntaLineal
       ? null

@@ -94,7 +94,7 @@ describe("createRegistro usa el cálculo autoritativo", () => {
         factor_por_holguras: 99,
         cantidad_sellos_con_factores: 999,
         accesibilidad: 2,
-        aislacion: 1.3,
+        aislacion: 1,
         cantidad_sellos_aislacion: null,
         reparacionTabique: 1,
         cantidad_final: null,
@@ -111,7 +111,7 @@ describe("createRegistro usa el cálculo autoritativo", () => {
         cantidad_sellos: 3,
         holgura: 4,
         accesibilidad: 2,
-        aislacion: 1.3,
+        aislacion: true,
         reparacion_tabique: 1,
       })
     );
@@ -169,7 +169,7 @@ describe("createRegistro usa el cálculo autoritativo", () => {
       request.body.obraId,
       expect.objectContaining({
         holgura: 0,
-        accesibilidad: 1,
+        accesibilidad: 0,
         aislacion: null,
         reparacion_tabique: null,
       }),
