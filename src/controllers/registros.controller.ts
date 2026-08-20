@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { EstadoObra, EstadoRegistroTerreno } from "@prisma/client";
+import { EstadoObra, EstadoRegistroTerreno, Prisma } from "@prisma/client";
 import { prisma } from "../config/prisma";
 import {
   deleteImageFromCloudinary,
@@ -725,6 +725,192 @@ export async function getMisRegistros(req: Request, res: Response) {
       success: false,
       error: "No se pudieron obtener los registros",
     });
+  }
+}
+
+const HISTORIAL_RESUMEN_SELECT = {
+  id: true,
+  obra_id: true,
+  usuario_id: true,
+  fecha: true,
+  dia_semana: true,
+  tipo_registro: true,
+  estado: true,
+  piso: true,
+  numero_sello: true,
+  nombre_sellador: true,
+  descripcion_material: true,
+  itemizado_beck: true,
+  codigo_beck: true,
+  created_at: true,
+  updated_at: true,
+  es_correccion: true,
+  registro_origen_id: true,
+  devuelto_a_tecnico: true,
+  corregido_at: true,
+  motivo_rechazo: true,
+  fecha_rechazo: true,
+  obras: { select: { id: true, nombre: true, codigo: true } },
+  usuarios: { select: { id: true, nombre: true, email: true, rol: true } },
+} satisfies Prisma.registros_terrenoSelect;
+
+function parseHistorialLimit(value: unknown) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0
+    ? Math.min(Math.trunc(parsed), 50)
+    : 25;
+}
+
+function buildHistorialFilters(req: Request): Prisma.registros_terrenoWhereInput {
+  const search = normalizeText(req.query.search);
+  const obraId = normalizeText(req.query.obraId);
+  const fecha = normalizeText(req.query.fecha);
+
+  return {
+    ...(obraId ? { obra_id: obraId } : {}),
+    ...(fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha)
+      ? { fecha: new Date(`${fecha}T00:00:00.000Z`) }
+      : {}),
+    ...(search
+      ? {
+          OR: [
+            { numero_sello: { contains: search, mode: "insensitive" } },
+            { piso: { contains: search, mode: "insensitive" } },
+            { nombre_sellador: { contains: search, mode: "insensitive" } },
+            { codigo_beck: { contains: search, mode: "insensitive" } },
+            { obras: { nombre: { contains: search, mode: "insensitive" } } },
+            { obras: { codigo: { contains: search, mode: "insensitive" } } },
+          ],
+        }
+      : {}),
+  };
+}
+
+export async function getHistorialRegistros(req: Request, res: Response) {
+  try {
+    const userId = req.user?.id;
+    const role = req.user?.rol;
+    if (!userId) return res.status(401).json({ success: false, error: "Usuario no autenticado" });
+
+    let roleWhere: Prisma.registros_terrenoWhereInput;
+    if (role === "terreno") {
+      roleWhere = { usuario_id: userId };
+    } else if (role === "jefeobra") {
+      roleWhere = {
+        enviado_ingenieria_por_id: userId,
+        estado: { not: EstadoRegistroTerreno.pendiente },
+        obras: { estado: { in: [EstadoObra.activa, EstadoObra.pausada] } },
+      };
+    } else if (role === "ingenieria") {
+      roleWhere = {
+        procesamiento_ingenieria: { is: { usuario_id: userId } },
+      };
+    } else if (isAdmin(role)) {
+      roleWhere = {};
+    } else {
+      return res.status(403).json({ success: false, error: "Rol sin acceso al historial" });
+    }
+
+    const where: Prisma.registros_terrenoWhereInput = {
+      carga_completa: true,
+      AND: [roleWhere, buildHistorialFilters(req)],
+    };
+    const limit = parseHistorialLimit(req.query.limit);
+    const cursor = normalizeText(req.query.cursor);
+    const [rows, total, historialObras] = await prisma.$transaction([
+      prisma.registros_terreno.findMany({
+        where,
+        orderBy: [{ created_at: "desc" }, { id: "desc" }],
+        take: limit + 1,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        select: HISTORIAL_RESUMEN_SELECT,
+      }),
+      prisma.registros_terreno.count({ where }),
+      prisma.registros_terreno.findMany({
+        where: { carga_completa: true, AND: [roleWhere] },
+        distinct: ["obra_id"],
+        select: { obra_id: true, obras: { select: { nombre: true } } },
+        orderBy: { obra_id: "asc" },
+      }),
+    ]);
+    const hasMore = rows.length > limit;
+    const items = hasMore ? rows.slice(0, limit) : rows;
+
+    return res.json({
+      success: true,
+      data: {
+        items,
+        total,
+        nextCursor: hasMore ? items[items.length - 1]?.id ?? null : null,
+        obras: historialObras.map((item) => ({ id: item.obra_id, nombre: item.obras.nombre })),
+      },
+    });
+  } catch (error) {
+    console.error("GET HISTORIAL REGISTROS ERROR:", error);
+    return res.status(500).json({ success: false, error: "No se pudo obtener el historial" });
+  }
+}
+
+export async function getHistorialRegistroDetalle(req: Request, res: Response) {
+  try {
+    const userId = req.user?.id;
+    const role = req.user?.rol;
+    const id = normalizeText(req.params.id);
+    if (!userId) return res.status(401).json({ success: false, error: "Usuario no autenticado" });
+
+    const registro = await prisma.registros_terreno.findUnique({
+      where: { id },
+      include: {
+        obras: { select: { id: true, nombre: true, codigo: true, estado: true, cliente: true, direccion: true } },
+        usuarios: { select: { id: true, nombre: true, email: true, rol: true } },
+        fotos: { orderBy: { created_at: "desc" } },
+        usuarios_registros_terreno_rechazado_por_idTousuarios: {
+          select: { id: true, nombre: true, email: true, rol: true },
+        },
+        registros_terreno: {
+          include: { fotos: { orderBy: { created_at: "desc" } } },
+        },
+        procesamiento_ingenieria: true,
+      },
+    });
+    if (!registro || !registro.carga_completa) {
+      return res.status(404).json({ success: false, error: "Registro no encontrado" });
+    }
+
+    const allowed = isAdmin(role)
+      || (role === "terreno" && registro.usuario_id === userId)
+      || (role === "jefeobra" && await canAccessObra(userId, role, registro.obra_id))
+      || role === "ingenieria";
+    if (!allowed) return res.status(403).json({ success: false, error: "Sin acceso al registro" });
+
+    const normalizeFotos = (value: typeof registro | NonNullable<typeof registro.registros_terreno>) => {
+      const relation = (value.fotos || []).filter((foto) => foto.url);
+      const fallback = relation.length ? [] : [
+        ...(Array.isArray(value.fotos_urls) ? value.fotos_urls : []),
+        value.foto_url,
+      ].filter((url): url is string => Boolean(url));
+      const seen = new Set<string>();
+      return [
+        ...relation.map((foto) => ({ id: foto.id, url: withPrivateImageUrl(foto).url, created_at: foto.created_at })),
+        ...fallback.map((url, index) => ({ id: `${value.id}-url-${index}`, url, created_at: new Date(0) })),
+      ].filter((foto) => !seen.has(foto.url) && Boolean(seen.add(foto.url)));
+    };
+    const factores = await getFactoresAislacionObra(registro.obra_id);
+    return res.json({
+      success: true,
+      data: {
+        ...registro,
+        fotos: normalizeFotos(registro),
+        aislacion_aplica: resolveEstadoAislacionDesdeFactor(registro.aislacion, factores),
+        rechazado_por: registro.usuarios_registros_terreno_rechazado_por_idTousuarios,
+        registro_origen: registro.registros_terreno
+          ? { ...registro.registros_terreno, fotos: normalizeFotos(registro.registros_terreno) }
+          : null,
+      },
+    });
+  } catch (error) {
+    console.error("GET HISTORIAL REGISTRO DETALLE ERROR:", error);
+    return res.status(500).json({ success: false, error: "No se pudo obtener el detalle" });
   }
 }
 

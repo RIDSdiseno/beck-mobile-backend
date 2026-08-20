@@ -3,6 +3,7 @@ import rateLimit from "express-rate-limit";
 import {
   getClienteDashboard,
   getClienteHistorial,
+  getClienteRegistroDetalle,
   getClienteObras,
   getClienteRegistrosObra,
   descargarPdfCliente,
@@ -25,6 +26,7 @@ router.get("/obras",                        verifyAppToken, getClienteObras);
 router.get("/obras/:obraId/registros",      verifyAppToken, getClienteRegistrosObra);
 // historial DEBE ir antes de :id para que no se interprete como parámetro
 router.get("/registros/historial",          verifyAppToken, getClienteHistorial);
+router.get("/registros/:id",                verifyAppToken, getClienteRegistroDetalle);
 router.get("/registros/:id/pdf",             verifyAppToken, descargarPdfCliente);
 router.post("/registros/:id/validar",       verifyAppToken, firmaLimiter, validarRegistroCliente);
 

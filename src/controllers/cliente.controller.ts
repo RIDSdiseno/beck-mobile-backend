@@ -306,23 +306,98 @@ export async function getClienteHistorial(req: Request, res: Response) {
       return res.json({ success: true, data: [] });
     }
 
-    const registros = await prisma.registros_terreno.findMany({
-      where: {
-        obra_id:          { in: obraIds },
-        estado:           "validado",
-        validado_cliente: true,
-      },
-      select: {
-        ...REGISTRO_SELECT,
-        obras: { select: { nombre: true, codigo: true } },
-      },
-      orderBy: { validado_cliente_at: "desc" },
-    });
+    const paginated = req.query.paginated === "true";
+    const search = String(req.query.search ?? "").trim();
+    const obraId = String(req.query.obraId ?? "").trim();
+    const fecha = String(req.query.fecha ?? "").trim();
+    const requestedLimit = Number(req.query.limit);
+    const limit = Number.isFinite(requestedLimit) && requestedLimit > 0
+      ? Math.min(Math.trunc(requestedLimit), 50)
+      : 25;
+    const cursor = String(req.query.cursor ?? "").trim();
+    const where = {
+      obra_id: { in: obraIds, ...(obraId ? { equals: obraId } : {}) },
+      estado: "validado" as const,
+      validado_cliente: true,
+      ...(fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha)
+        ? { fecha: new Date(`${fecha}T00:00:00.000Z`) }
+        : {}),
+      ...(search
+        ? {
+            OR: [
+              { numero_sello: { contains: search, mode: "insensitive" as const } },
+              { piso: { contains: search, mode: "insensitive" as const } },
+              { nombre_sellador: { contains: search, mode: "insensitive" as const } },
+              { obras: { nombre: { contains: search, mode: "insensitive" as const } } },
+              { obras: { codigo: { contains: search, mode: "insensitive" as const } } },
+            ],
+          }
+        : {}),
+    };
 
-    return res.json({ success: true, data: registros.map(normalizeRegistroCliente) });
+    if (!paginated) {
+      const registros = await prisma.registros_terreno.findMany({
+        where,
+        select: { ...REGISTRO_SELECT, obras: { select: { nombre: true, codigo: true } } },
+        orderBy: { validado_cliente_at: "desc" },
+      });
+      return res.json({ success: true, data: registros.map(normalizeRegistroCliente) });
+    }
+
+    const [rows, total, historialObras] = await prisma.$transaction([
+      prisma.registros_terreno.findMany({
+        where,
+        select: {
+          id: true, fecha: true, tipo_registro: true, estado: true, piso: true,
+          numero_sello: true, nombre_sellador: true, created_at: true, updated_at: true,
+          obra_id: true, validado_cliente: true, validado_cliente_at: true,
+          pdf_firmado_url: true,
+          obras: { select: { nombre: true, codigo: true } },
+        },
+        orderBy: [{ validado_cliente_at: "desc" }, { id: "desc" }],
+        take: limit + 1,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+      }),
+      prisma.registros_terreno.count({ where }),
+      prisma.registros_terreno.findMany({
+        where: { obra_id: { in: obraIds }, estado: "validado", validado_cliente: true },
+        distinct: ["obra_id"],
+        select: { obra_id: true, obras: { select: { nombre: true } } },
+        orderBy: { obra_id: "asc" },
+      }),
+    ]);
+    const hasMore = rows.length > limit;
+    const pageRows = hasMore ? rows.slice(0, limit) : rows;
+    return res.json({
+      success: true,
+      data: {
+        items: pageRows.map(normalizeRegistroCliente),
+        total,
+        nextCursor: hasMore ? pageRows[pageRows.length - 1]?.id ?? null : null,
+        obras: historialObras.map((item) => ({ id: item.obra_id, nombre: item.obras.nombre })),
+      },
+    });
   } catch (error) {
     console.error("GET CLIENTE HISTORIAL ERROR:", error);
     return res.status(500).json({ success: false, error: "No se pudo obtener el historial del cliente" });
+  }
+}
+
+export async function getClienteRegistroDetalle(req: Request, res: Response) {
+  try {
+    const session = requireCliente(req, res);
+    if (!session) return;
+    const id = typeof req.params.id === "string" ? req.params.id : "";
+    const obraIds = await getObraIdsCliente(session.userId, session.userRole);
+    const registro = await prisma.registros_terreno.findFirst({
+      where: { id, obra_id: { in: obraIds }, validado_cliente: true },
+      select: { ...REGISTRO_SELECT, obras: { select: { nombre: true, codigo: true } } },
+    });
+    if (!registro) return res.status(404).json({ success: false, error: "Registro no encontrado" });
+    return res.json({ success: true, data: normalizeRegistroCliente(registro) });
+  } catch (error) {
+    console.error("GET CLIENTE REGISTRO DETALLE ERROR:", error);
+    return res.status(500).json({ success: false, error: "No se pudo obtener el detalle" });
   }
 }
 

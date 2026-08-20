@@ -6,6 +6,8 @@ import {
   deleteRegistroPendiente,
   devolverRegistroATecnico,
   getMisRegistros,
+  getHistorialRegistros,
+  getHistorialRegistroDetalle,
   getResumenSupervisor,
   updateRegistroJefeObra,
   updateRegistroObservaciones,
@@ -16,6 +18,8 @@ import {
 const router = Router();
 
 router.get("/mis-registros", verifyAppToken, getMisRegistros);
+router.get("/historial", verifyAppToken, getHistorialRegistros);
+router.get("/historial/:id", verifyAppToken, getHistorialRegistroDetalle);
 router.get(
   "/resumen-supervisor",
   verifyAppToken,
