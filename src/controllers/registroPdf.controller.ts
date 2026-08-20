@@ -191,6 +191,9 @@ function buildPdfContent(
   if (visible("itemizadoBeck")) {
     pdfFieldRow(doc, "Itemizado BECK:", registro.itemizado_beck || registro.descripcion_material);
   }
+  if (visible("dimensiones")) {
+    pdfFieldRow(doc, "Dimensiones:", registro.dimensiones);
+  }
   if (visible("itemizadoMandante")) {
     pdfFieldRow(doc, "Itemizado Mandante:", registro.itemizado_mandante);
   }

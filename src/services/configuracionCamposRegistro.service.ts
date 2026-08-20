@@ -22,6 +22,7 @@ const CAMPOS_JEFEOBRA: CampoRegistroConfig[] = [
   { campo: "tipo_registro", appCampo: "tipoRegistro", color: "verde" },
   { campo: "codigoBeck", appCampo: "codigoBeck", color: "verde" },
   { campo: "itemizadoBeck", appCampo: "itemizadoBeck", color: "verde" },
+  { campo: "dimensiones", appCampo: "dimensiones", color: "azul" },
   { campo: "itemizadoMandante", appCampo: "itemizadoMandante", color: "azul" },
   { campo: "fechaEjecucionSello", appCampo: "fechaEjecucionSello", color: "verde" },
   { campo: "diaSemana", appCampo: "diaSemana", color: "verde" },
@@ -69,6 +70,7 @@ const CAMPOS_TRABAJADOR: CampoRegistroConfig[] = CAMPOS_JEFEOBRA.map(
 const CAMPOS_CLIENTE: CampoRegistroConfig[] = [
   { campo: "codigoBeck", appCampo: "codigoBeck", color: "azul" },
   { campo: "itemizadoBeck", appCampo: "itemizadoBeck", color: "azul" },
+  { campo: "dimensiones", appCampo: "dimensiones", color: "azul" },
   { campo: "itemizadoMandante", appCampo: "itemizadoMandante", color: "azul" },
   { campo: "fechaEjecucionSello", appCampo: "fechaEjecucionSello", color: "azul" },
   { campo: "diaSemana", appCampo: "diaSemana", color: "azul" },
@@ -94,7 +96,10 @@ const CAMPOS_CLIENTE: CampoRegistroConfig[] = [
 
 const CAMPOS_INGENIERIA: CampoRegistroConfig[] = [
   ...CAMPOS_JEFEOBRA.map(
-    (campo): CampoRegistroConfig => ({ ...campo, color: "verde" }),
+    (campo): CampoRegistroConfig => ({
+      ...campo,
+      color: campo.campo === "dimensiones" ? "azul" : "verde",
+    }),
   ),
   { campo: "rendimientoSellosEsperadoDiario", appCampo: "rendimientoSellosEsperadoDiario", color: "rojo" },
   { campo: "rendimientoReparacionEsperadoDiario", appCampo: "rendimientoReparacionEsperadoDiario", color: "verde" },

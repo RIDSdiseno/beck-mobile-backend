@@ -378,8 +378,6 @@ model registros_terreno {
   motivo_rechazo                                                      String?
   rechazado_por_id                                                    String?                   @db.Uuid
   reenviado_revision_at                                               DateTime?                 @db.Timestamp(6)
-  enviado_ingenieria_at                                               DateTime?                 @db.Timestamp(6)
-  enviado_ingenieria_por_id                                           String?                   @db.Uuid
   es_correccion                                                       Boolean                   @default(false)
   registro_origen_id                                                  String?                   @db.Uuid
   fecha_seleccion_inspeccion                                          DateTime?                 @db.Timestamp(6)
@@ -397,14 +395,17 @@ model registros_terreno {
   pdf_firmado_url                                                     String?
   nombre_firmante_cliente                                             String?                   @db.VarChar(255)
   carga_completa                                                      Boolean                   @default(true)
+  enviado_ingenieria_at                                               DateTime?                 @db.Timestamp(6)
+  enviado_ingenieria_por_id                                           String?                   @db.Uuid
+  dimensiones                                                         String?                   @db.VarChar(100)
   controles_inspeccion                                                controles_inspeccion[]
   fotos                                                               fotos_registro[]
   procesamiento_ingenieria                                            procesamiento_ingenieria?
+  usuarios_registros_terreno_enviado_ingenieria_por_idTousuarios      usuarios?                 @relation("registros_terreno_enviado_ingenieria_por_idTousuarios", fields: [enviado_ingenieria_por_id], references: [id], onUpdate: NoAction)
   usuarios_registros_terreno_inspeccion_revision_por_idTousuarios     usuarios?                 @relation("registros_terreno_inspeccion_revision_por_idTousuarios", fields: [inspeccion_revision_por_id], references: [id])
   itemizados_mandante                                                 itemizados_mandante?      @relation(fields: [itemizado_mandante_id], references: [id])
   obras                                                               obras                     @relation(fields: [obra_id], references: [id], onDelete: Cascade)
   usuarios_registros_terreno_rechazado_por_idTousuarios               usuarios?                 @relation("registros_terreno_rechazado_por_idTousuarios", fields: [rechazado_por_id], references: [id])
-  usuarios_registros_terreno_enviado_ingenieria_por_idTousuarios      usuarios?                 @relation("registros_terreno_enviado_ingenieria_por_idTousuarios", fields: [enviado_ingenieria_por_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
   registros_terreno                                                   registros_terreno?        @relation("registros_terrenoToregistros_terreno", fields: [registro_origen_id], references: [id])
   other_registros_terreno                                             registros_terreno[]       @relation("registros_terrenoToregistros_terreno")
   usuarios_registros_terreno_seleccionado_inspeccion_por_idTousuarios usuarios?                 @relation("registros_terreno_seleccionado_inspeccion_por_idTousuarios", fields: [seleccionado_inspeccion_por_id], references: [id])
@@ -497,9 +498,9 @@ model usuarios {
   obras_obras_itemizado_finalizado_por_idTousuarios                            obras[]                               @relation("obras_itemizado_finalizado_por_idTousuarios")
   permisos_usuario_modulo                                                      permisos_usuario_modulo[]
   procesamiento_ingenieria                                                     procesamiento_ingenieria[]
+  registros_terreno_registros_terreno_enviado_ingenieria_por_idTousuarios      registros_terreno[]                   @relation("registros_terreno_enviado_ingenieria_por_idTousuarios")
   registros_terreno_registros_terreno_inspeccion_revision_por_idTousuarios     registros_terreno[]                   @relation("registros_terreno_inspeccion_revision_por_idTousuarios")
   registros_terreno_registros_terreno_rechazado_por_idTousuarios               registros_terreno[]                   @relation("registros_terreno_rechazado_por_idTousuarios")
-  registros_terreno_registros_terreno_enviado_ingenieria_por_idTousuarios      registros_terreno[]                   @relation("registros_terreno_enviado_ingenieria_por_idTousuarios")
   registros_terreno_registros_terreno_seleccionado_inspeccion_por_idTousuarios registros_terreno[]                   @relation("registros_terreno_seleccionado_inspeccion_por_idTousuarios")
   registros_terreno                                                            registros_terreno[]
   registros_terreno_registros_terreno_validado_cliente_por_idTousuarios        registros_terreno[]                   @relation("registros_terreno_validado_cliente_por_idTousuarios")
@@ -978,18 +979,19 @@ model inventario_beck_epp {
 }
 
 model inventario_beck_herramientas {
-  id         String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
-  nombre     String    @db.VarChar(255)
-  marca      String?   @db.VarChar(150)
-  modelo     String?   @db.VarChar(150)
-  categoria  String?   @db.VarChar(150)
-  sku        String?   @db.VarChar(100)
-  ubicacion  String?   @db.VarChar(255)
-  fecha      DateTime? @db.Date
-  encargado  String?   @db.VarChar(255)
-  activo     Boolean   @default(true)
-  created_at DateTime  @default(now()) @db.Timestamp(6)
-  updated_at DateTime  @default(now()) @db.Timestamp(6)
+  id               String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  nombre           String    @db.VarChar(255)
+  marca            String?   @db.VarChar(150)
+  modelo           String?   @db.VarChar(150)
+  categoria        String?   @db.VarChar(150)
+  sku              String?   @db.VarChar(100)
+  ubicacion        String?   @db.VarChar(255)
+  fecha_compra     DateTime? @db.Date
+  encargado        String?   @db.VarChar(255)
+  activo           Boolean   @default(true)
+  created_at       DateTime  @default(now()) @db.Timestamp(6)
+  updated_at       DateTime  @default(now()) @db.Timestamp(6)
+  fecha_mantencion DateTime? @db.Date
 
   @@index([activo])
   @@index([categoria])
@@ -1025,6 +1027,176 @@ model inventario_beck_implementos {
   @@index([sku])
   @@index([talla_medida])
   @@index([ubicacion])
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model auditoria_registros_factores_20260814 {
+  id                             String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  obra_id                        String                   @db.Uuid
+  usuario_id                     String                   @db.Uuid
+  fecha                          DateTime                 @db.Date
+  dia_semana                     String                   @db.VarChar(20)
+  descripcion_material           String                   @db.VarChar(500)
+  modulo                         String                   @db.VarChar(100)
+  piso                           String                   @db.VarChar(50)
+  eje_numerico                   String                   @db.VarChar(50)
+  eje_alfabetico                 String                   @db.VarChar(10)
+  numero_sello                   String                   @db.VarChar(100)
+  cantidad_sellos                Int
+  nombre_sellador                String                   @db.VarChar(255)
+  holgura                        Decimal                  @db.Decimal(3, 1)
+  observaciones                  String?
+  fotos_urls                     String[]
+  created_at                     DateTime                 @default(now()) @db.Timestamp(6)
+  updated_at                     DateTime                 @default(now()) @db.Timestamp(6)
+  estado                         EstadoRegistroTerreno    @default(pendiente)
+  metros_lineales                Float?
+  tipo_registro                  String                   @default("sello_cortafuego") @db.VarChar(50)
+  devuelto_a_tecnico             Boolean                  @default(false)
+  codigo_beck                    String?
+  itemizado_mandante_id          String?                  @db.Uuid
+  itemizado_beck                 String?                  @db.VarChar(500)
+  itemizado_mandante             String?                  @db.VarChar(255)
+  foto_url                       String?
+  recinto                        String?                  @db.VarChar(100)
+  factor_por_holguras            Decimal?                 @db.Decimal(6, 2)
+  accesibilidad                  Int?
+  cantidad_sellos_con_factores   Decimal?                 @db.Decimal(12, 2)
+  aislacion                      Decimal?                 @db.Decimal(6, 2)
+  cantidad_sellos_aislacion      Decimal?                 @db.Decimal(12, 2)
+  reparacion_tabique             Decimal?                 @db.Decimal(6, 2)
+  cantidad_final                 Decimal?                 @db.Decimal(12, 2)
+  folio                          String?                  @db.VarChar(100)
+  corregido_at                   DateTime?                @db.Timestamp(6)
+  fecha_rechazo                  DateTime?                @db.Timestamp(6)
+  motivo_rechazo                 String?
+  rechazado_por_id               String?                  @db.Uuid
+  reenviado_revision_at          DateTime?                @db.Timestamp(6)
+  es_correccion                  Boolean                  @default(false)
+  registro_origen_id             String?                  @db.Uuid
+  fecha_seleccion_inspeccion     DateTime?                @db.Timestamp(6)
+  seleccionado_inspeccion_por_id String?                  @db.Uuid
+  seleccionado_para_inspeccion   Boolean                  @default(false)
+  validado_cliente               Boolean                  @default(false)
+  validado_cliente_at            DateTime?                @db.Timestamp(6)
+  validado_cliente_por_id        String?                  @db.Uuid
+  inspeccion_estado              EstadoInspeccion         @default(no_enviado)
+  inspeccion_revision_at         DateTime?                @db.Timestamp(6)
+  inspeccion_revision_estado     EstadoRevisionInspeccion @default(pendiente)
+  inspeccion_revision_por_id     String?                  @db.Uuid
+  motivo_rechazo_inspeccion      String?
+  firma_cliente_url              String?
+  pdf_firmado_url                String?
+  nombre_firmante_cliente        String?                  @db.VarChar(255)
+  carga_completa                 Boolean                  @default(true)
+  enviado_ingenieria_at          DateTime?                @db.Timestamp(6)
+  enviado_ingenieria_por_id      String?                  @db.Uuid
+
+  @@index([devuelto_a_tecnico])
+  @@index([enviado_ingenieria_at])
+  @@index([es_correccion])
+  @@index([estado])
+  @@index([fecha(sort: Desc)])
+  @@index([inspeccion_estado])
+  @@index([itemizado_mandante_id])
+  @@index([obra_id])
+  @@index([rechazado_por_id])
+  @@index([registro_origen_id])
+  @@index([tipo_registro])
+  @@index([usuario_id])
+  @@index([validado_cliente])
+  @@index([validado_cliente_por_id], map: "auditoria_registros_factores_202608_validado_cliente_por_id_idx")
+  @@index([carga_completa, created_at], map: "auditoria_registros_factores_2026_carga_completa_created_at_idx")
+  @@index([enviado_ingenieria_por_id], map: "auditoria_registros_factores_2026_enviado_ingenieria_por_id_idx")
+  @@index([inspeccion_revision_estado], map: "auditoria_registros_factores_202_inspeccion_revision_estado_idx")
+  @@index([inspeccion_revision_por_id], map: "auditoria_registros_factores_202_inspeccion_revision_por_id_idx")
+  @@index([seleccionado_para_inspeccion], map: "auditoria_registros_factores_2_seleccionado_para_inspeccion_idx")
+  @@index([seleccionado_inspeccion_por_id], map: "auditoria_registros_factores__seleccionado_inspeccion_por_i_idx")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model auditoria_registros_holgura_20260813 {
+  id                             String                   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  obra_id                        String                   @db.Uuid
+  usuario_id                     String                   @db.Uuid
+  fecha                          DateTime                 @db.Date
+  dia_semana                     String                   @db.VarChar(20)
+  descripcion_material           String                   @db.VarChar(500)
+  modulo                         String                   @db.VarChar(100)
+  piso                           String                   @db.VarChar(50)
+  eje_numerico                   String                   @db.VarChar(50)
+  eje_alfabetico                 String                   @db.VarChar(10)
+  numero_sello                   String                   @db.VarChar(100)
+  cantidad_sellos                Int
+  nombre_sellador                String                   @db.VarChar(255)
+  holgura                        Decimal                  @db.Decimal(3, 1)
+  observaciones                  String?
+  fotos_urls                     String[]
+  created_at                     DateTime                 @default(now()) @db.Timestamp(6)
+  updated_at                     DateTime                 @default(now()) @db.Timestamp(6)
+  estado                         EstadoRegistroTerreno    @default(pendiente)
+  metros_lineales                Float?
+  tipo_registro                  String                   @default("sello_cortafuego") @db.VarChar(50)
+  devuelto_a_tecnico             Boolean                  @default(false)
+  codigo_beck                    String?
+  itemizado_mandante_id          String?                  @db.Uuid
+  itemizado_beck                 String?                  @db.VarChar(500)
+  itemizado_mandante             String?                  @db.VarChar(255)
+  foto_url                       String?
+  recinto                        String?                  @db.VarChar(100)
+  factor_por_holguras            Decimal?                 @db.Decimal(6, 2)
+  accesibilidad                  Int?
+  cantidad_sellos_con_factores   Decimal?                 @db.Decimal(12, 2)
+  aislacion                      Decimal?                 @db.Decimal(6, 2)
+  cantidad_sellos_aislacion      Decimal?                 @db.Decimal(12, 2)
+  reparacion_tabique             Decimal?                 @db.Decimal(6, 2)
+  cantidad_final                 Decimal?                 @db.Decimal(12, 2)
+  folio                          String?                  @db.VarChar(100)
+  corregido_at                   DateTime?                @db.Timestamp(6)
+  fecha_rechazo                  DateTime?                @db.Timestamp(6)
+  motivo_rechazo                 String?
+  rechazado_por_id               String?                  @db.Uuid
+  reenviado_revision_at          DateTime?                @db.Timestamp(6)
+  es_correccion                  Boolean                  @default(false)
+  registro_origen_id             String?                  @db.Uuid
+  fecha_seleccion_inspeccion     DateTime?                @db.Timestamp(6)
+  seleccionado_inspeccion_por_id String?                  @db.Uuid
+  seleccionado_para_inspeccion   Boolean                  @default(false)
+  validado_cliente               Boolean                  @default(false)
+  validado_cliente_at            DateTime?                @db.Timestamp(6)
+  validado_cliente_por_id        String?                  @db.Uuid
+  inspeccion_estado              EstadoInspeccion         @default(no_enviado)
+  inspeccion_revision_at         DateTime?                @db.Timestamp(6)
+  inspeccion_revision_estado     EstadoRevisionInspeccion @default(pendiente)
+  inspeccion_revision_por_id     String?                  @db.Uuid
+  motivo_rechazo_inspeccion      String?
+  firma_cliente_url              String?
+  pdf_firmado_url                String?
+  nombre_firmante_cliente        String?                  @db.VarChar(255)
+  carga_completa                 Boolean                  @default(true)
+  enviado_ingenieria_at          DateTime?                @db.Timestamp(6)
+  enviado_ingenieria_por_id      String?                  @db.Uuid
+
+  @@index([devuelto_a_tecnico])
+  @@index([enviado_ingenieria_at])
+  @@index([es_correccion])
+  @@index([estado])
+  @@index([fecha(sort: Desc)])
+  @@index([inspeccion_estado])
+  @@index([itemizado_mandante_id])
+  @@index([obra_id])
+  @@index([rechazado_por_id])
+  @@index([registro_origen_id])
+  @@index([tipo_registro])
+  @@index([usuario_id])
+  @@index([validado_cliente])
+  @@index([validado_cliente_por_id], map: "auditoria_registros_holgura_2026081_validado_cliente_por_id_idx")
+  @@index([carga_completa, created_at], map: "auditoria_registros_holgura_20260_carga_completa_created_at_idx")
+  @@index([enviado_ingenieria_por_id], map: "auditoria_registros_holgura_20260_enviado_ingenieria_por_id_idx")
+  @@index([inspeccion_revision_estado], map: "auditoria_registros_holgura_2026_inspeccion_revision_estado_idx")
+  @@index([inspeccion_revision_por_id], map: "auditoria_registros_holgura_2026_inspeccion_revision_por_id_idx")
+  @@index([seleccionado_para_inspeccion], map: "auditoria_registros_holgura_20_seleccionado_para_inspeccion_idx")
+  @@index([seleccionado_inspeccion_por_id], map: "auditoria_registros_holgura_2_seleccionado_inspeccion_por_i_idx")
 }
 
 enum EstadoCierreFunnel {

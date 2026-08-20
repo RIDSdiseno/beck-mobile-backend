@@ -46,6 +46,16 @@ function parseOptionalDecimal(value: unknown) {
   return new Prisma.Decimal(parsed);
 }
 
+function parseOptionalBinaryDecimal(value: unknown) {
+  if (value === undefined) return undefined;
+  if (value === null || normalizeText(value) === "") return null;
+
+  const parsed = Number(value);
+  if (parsed !== 0 && parsed !== 1) return undefined;
+
+  return new Prisma.Decimal(parsed);
+}
+
 function parseOptionalInt(value: unknown) {
   if (value === undefined) return undefined;
   if (value === null || normalizeText(value) === "") return null;
@@ -596,12 +606,12 @@ export async function updateRegistroIngenieria(req: Request, res: Response) {
       data.aislacion = aislacionParsed;
     }
 
-    const reparacionParsed = parseOptionalDecimal(reparacionTabiqueInput);
+    const reparacionParsed = parseOptionalBinaryDecimal(reparacionTabiqueInput);
     if (reparacionTabiqueInput !== undefined) {
       if (reparacionParsed === undefined) {
         return res.status(400).json({
           success: false,
-          error: "Reparación de tabique no válida",
+          error: "Reparación de tabique debe ser 0 (No aplica) o 1 (Aplica)",
         });
       }
       data.reparacion_tabique = reparacionParsed;
@@ -919,6 +929,7 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
           codigo_beck: currentRegistro.codigo_beck,
           itemizado_mandante_id: currentRegistro.itemizado_mandante_id,
           itemizado_beck: currentRegistro.itemizado_beck,
+          dimensiones: currentRegistro.dimensiones,
           itemizado_mandante: currentRegistro.itemizado_mandante,
           foto_url: currentRegistro.foto_url,
           recinto: currentRegistro.recinto,

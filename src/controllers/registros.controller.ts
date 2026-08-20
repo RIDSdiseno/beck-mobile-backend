@@ -68,6 +68,17 @@ function normalizeText(value: unknown) {
   return String(value || "").trim();
 }
 
+function parseDimensiones(value: unknown) {
+  const normalized = normalizeText(value);
+  if (normalized.length > 100) {
+    return {
+      value: null,
+      error: "dimensiones no puede superar los 100 caracteres",
+    };
+  }
+  return { value: normalized || null, error: null };
+}
+
 function parsePositiveInteger(value: unknown, fieldName: string) {
   const parsed = Number(value);
 
@@ -113,6 +124,22 @@ function parseOptionalNonNegativeNumber(value: unknown, fieldName: string) {
   }
 
   return parseNonNegativeNumber(value, fieldName);
+}
+
+function parseOptionalBinaryNumber(value: unknown, fieldName: string) {
+  if (value === undefined || value === null || String(value).trim() === "") {
+    return { value: null, error: null };
+  }
+
+  const parsed = Number(value);
+  if (parsed !== 0 && parsed !== 1) {
+    return {
+      value: null,
+      error: `${fieldName} debe ser 0 (No aplica) o 1 (Aplica)`,
+    };
+  }
+
+  return { value: parsed, error: null };
 }
 
 function parseAccesibilidadNivel(value: unknown) {
@@ -185,6 +212,7 @@ export async function createRegistro(req: Request, res: Response) {
       fecha,
       descripcionMaterial,
       itemizadoBeck,
+      dimensiones,
       recinto,
       moduloEdificio,
       modulo,
@@ -312,6 +340,17 @@ export async function createRegistro(req: Request, res: Response) {
       isJuntaLineal || !esVisible("reparacion_tabique")
         ? null
         : reparacionTabique;
+    const dimensionesInput =
+      userRole === "terreno" && !isJuntaLineal && esVisible("dimensiones")
+        ? dimensiones
+        : null;
+    const dimensionesParsed = parseDimensiones(dimensionesInput);
+    if (dimensionesParsed.error) {
+      return res.status(400).json({
+        success: false,
+        error: dimensionesParsed.error,
+      });
+    }
 
     const requiredConfiguredFields = {
       ...(esVisible("modulo") ? { modulo: normalizedModulo } : {}),
@@ -356,7 +395,7 @@ export async function createRegistro(req: Request, res: Response) {
       : parseOptionalNonNegativeNumber(aislacionInput, "aislacion");
     const reparacionTabiqueParsed = isJuntaLineal
       ? { value: null, error: null }
-      : parseOptionalNonNegativeNumber(reparacionTabiqueInput, "reparacionTabique");
+      : parseOptionalBinaryNumber(reparacionTabiqueInput, "reparacionTabique");
     const numericErrors = [
       cantidadSellosParsed.error,
       holguraParsed.error,
@@ -395,6 +434,7 @@ export async function createRegistro(req: Request, res: Response) {
           ? "Junta Lineal Espuma"
           : normalizedItemizadoBeck,
         itemizado_beck: isJuntaLineal ? null : normalizedItemizadoBeck,
+        dimensiones: isJuntaLineal ? null : dimensionesParsed.value,
         modulo: normalizedModulo,
         recinto: normalizedRecinto || null,
         piso: normalizeText(piso),
@@ -912,6 +952,7 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
       fecha,
       descripcionMaterial,
       itemizadoBeck,
+      dimensiones,
       recinto,
       moduloEdificio,
       modulo,
@@ -947,6 +988,16 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
     const itemizadoMandanteInput = campoVisible("itemizadoMandante")
       ? itemizadoSacyr
       : undefined;
+    const dimensionesInput = campoVisible("dimensiones") ? dimensiones : undefined;
+    const dimensionesParsed = parseDimensiones(
+      dimensionesInput === undefined ? currentRegistro.dimensiones : dimensionesInput,
+    );
+    if (dimensionesParsed.error) {
+      return res.status(400).json({
+        success: false,
+        error: dimensionesParsed.error,
+      });
+    }
 
     const normalizedTipoRegistro =
       normalizeText(tipoRegistro) || currentRegistro.tipo_registro || "sello_cortafuego";
@@ -993,7 +1044,7 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
       : parseOptionalNonNegativeNumber(aislacionInput, "aislacion");
     const reparacionTabiqueParsed = isJuntaLineal
       ? { value: null, error: null }
-      : parseOptionalNonNegativeNumber(reparacionTabiqueInput, "reparacionTabique");
+      : parseOptionalBinaryNumber(reparacionTabiqueInput, "reparacionTabique");
     const numericErrors = [
       cantidadSellosParsed.error,
       holguraParsed.error,
@@ -1060,6 +1111,7 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
             normalizeText(descripcionMaterial) ||
             currentRegistro.itemizado_beck ||
             currentRegistro.descripcion_material,
+        dimensiones: isJuntaLineal ? null : dimensionesParsed.value,
         modulo:
           normalizeText(moduloEdificioInput) ||
           normalizeText(moduloInput) ||
@@ -1491,7 +1543,7 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
       : parseOptionalNonNegativeNumber(aislacionInput, "aislacion");
     const reparacionTabiqueParsed = isJuntaLineal
       ? { value: null, error: null }
-      : parseOptionalNonNegativeNumber(reparacionTabiqueInput, "reparacionTabique");
+      : parseOptionalBinaryNumber(reparacionTabiqueInput, "reparacionTabique");
     const numericErrors = [
       cantidadSellosParsed.error,
       holguraParsed.error,

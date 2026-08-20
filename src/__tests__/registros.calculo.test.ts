@@ -184,4 +184,41 @@ describe("createRegistro usa el cálculo autoritativo", () => {
     });
     expect(response.status).toHaveBeenCalledWith(201);
   });
+
+  it("rechaza reparación de tabique distinta de 0 o 1", async () => {
+    const request = {
+      user: { id: "usuario-1", rol: "terreno" },
+      body: {
+        obraId: "a6048c0c-7641-4ae8-ac05-4a124fc68bc9",
+        fecha: "2026-07-30",
+        descripcionMaterial: "Tubería metálica",
+        itemizadoBeck: "Tubería metálica",
+        modulo: "Módulo A",
+        recinto: "Sala",
+        piso: "1",
+        ejeNumerico: "1",
+        ejeAlfabetico: "A",
+        numeroSello: "S-3",
+        cantidadSellos: 1,
+        nombreSellador: "Operario",
+        holgura: 2,
+        accesibilidad: 1,
+        aislacion: 0,
+        reparacionTabique: 9,
+        tipoRegistro: "sello_cortafuego",
+      },
+    } as unknown as Request;
+    const response = buildResponse();
+
+    await createRegistro(request, response);
+
+    expect(response.status).toHaveBeenCalledWith(400);
+    expect(response.json).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: expect.stringContaining("reparacionTabique debe ser 0"),
+      }),
+    );
+    expect(mockCalcularCampos).not.toHaveBeenCalled();
+    expect(mockCreateRegistro).not.toHaveBeenCalled();
+  });
 });
