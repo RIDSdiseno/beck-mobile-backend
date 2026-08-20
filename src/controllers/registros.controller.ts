@@ -793,6 +793,7 @@ export async function getResumenSupervisor(req: Request, res: Response) {
           estado: EstadoRegistroTerreno.pendiente,
           es_correccion: true,
           corregido_at: null,
+          devuelto_a_tecnico: false,
         },
       }),
     ]);
