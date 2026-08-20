@@ -53,7 +53,12 @@ export async function getConfiguracionRegistro(req: Request, res: Response) {
       });
     }
 
-    const rolConfiguracion = normalizarRolConfiguracion(rol);
+    const vistaSolicitada = typeof req.query.vista === "string" ? req.query.vista : "";
+    const vistaAdministrador = rol === "administrador" &&
+      ["trabajador", "jefeobra", "cliente", "ingenieria"].includes(vistaSolicitada)
+        ? vistaSolicitada as "trabajador" | "jefeobra" | "cliente" | "ingenieria"
+        : null;
+    const rolConfiguracion = vistaAdministrador ?? normalizarRolConfiguracion(rol);
     if (!rolConfiguracion) {
       return res.status(403).json({
         success: false,

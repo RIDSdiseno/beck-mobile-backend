@@ -479,6 +479,7 @@ model usuarios {
   updated_at                                                                   DateTime                              @default(now()) @db.Timestamp(6)
   azure_id                                                                     String?                               @unique @db.VarChar(255)
   alertas_vistas                                                               alertas_vistas[]
+  actividad_app                                                                actividad_app[]
   configuracion_vista_cliente_usuario                                          configuracion_vista_cliente_usuario[]
   controles_inspeccion_correccion_enviada                                      controles_inspeccion[]                @relation("ControlesInspeccionCorreccionEnviadaPor")
   controles_inspeccion                                                         controles_inspeccion[]                @relation("ControlesInspeccionPorIngeniero")
@@ -509,6 +510,27 @@ model usuarios {
   @@index([activo])
   @@index([email])
   @@index([rol])
+}
+
+model actividad_app {
+  id           String   @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  usuario_id   String   @db.Uuid
+  modulo       String   @db.VarChar(50)
+  accion       String   @db.VarChar(100)
+  entidad_tipo String?  @db.VarChar(50)
+  entidad_id   String?  @db.Uuid
+  descripcion  String   @db.VarChar(500)
+  metodo       String   @db.VarChar(10)
+  ruta         String   @db.VarChar(255)
+  datos        Json?
+  created_at   DateTime @default(now()) @db.Timestamp(6)
+  usuarios     usuarios @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+
+  @@index([usuario_id, created_at(sort: Desc)])
+  @@index([modulo])
+  @@index([accion])
+  @@index([entidad_id])
+  @@index([created_at(sort: Desc)])
 }
 
 model usuarios_obras {

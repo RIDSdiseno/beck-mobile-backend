@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { EstadoObra, EstadoRegistroTerreno, Prisma } from "@prisma/client";
+import { EstadoObra, EstadoRegistroTerreno, Prisma, RolUsuario } from "@prisma/client";
 import { prisma } from "../config/prisma";
 import {
   deleteImageFromCloudinary,
@@ -500,6 +500,15 @@ export async function getMisRegistros(req: Request, res: Response) {
     const obraId = typeof req.query.obraId === "string" ? req.query.obraId : undefined;
     const estado = typeof req.query.estado === "string" ? req.query.estado : undefined;
     const scope = typeof req.query.scope === "string" ? req.query.scope : undefined;
+    const vistaAdministrador = userRole === "administrador" &&
+      (req.query.vista === "operario" || req.query.vista === "supervisor")
+        ? req.query.vista
+        : undefined;
+    const operationalRole = vistaAdministrador === "supervisor"
+      ? "jefeobra"
+      : vistaAdministrador === "operario"
+        ? "terreno"
+        : userRole;
 
     if (!userId) {
       return res.status(401).json({
@@ -525,8 +534,8 @@ export async function getMisRegistros(req: Request, res: Response) {
         { estado: { not: EstadoRegistroTerreno.pendiente } },
       ],
     };
-    const where =
-      userRole === "jefeobra"
+    const where: Prisma.registros_terrenoWhereInput =
+      operationalRole === "jefeobra"
         ? {
             carga_completa: true,
             ...(scope === "historial"
@@ -540,14 +549,14 @@ export async function getMisRegistros(req: Request, res: Response) {
               },
             },
             usuarios: {
-              rol: "terreno" as const,
+              rol: { in: [RolUsuario.terreno, RolUsuario.administrador] },
             },
           }
         : {
             carga_completa: true,
             usuario_id: userId,
             ...(estado ? { estado: estado as EstadoRegistroTerreno } : {}),
-            ...(userRole === "terreno" ? { AND: [visibilidadTerreno] } : {}),
+            ...(operationalRole === "terreno" ? { AND: [visibilidadTerreno] } : {}),
             ...(scope === "registro"
               ? {
                   OR: [
@@ -765,11 +774,15 @@ function buildHistorialFilters(req: Request): Prisma.registros_terrenoWhereInput
   const search = normalizeText(req.query.search);
   const obraId = normalizeText(req.query.obraId);
   const fecha = normalizeText(req.query.fecha);
+  const estado = normalizeText(req.query.estado);
 
   return {
     ...(obraId ? { obra_id: obraId } : {}),
     ...(fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha)
       ? { fecha: new Date(`${fecha}T00:00:00.000Z`) }
+      : {}),
+    ...(estado && Object.values(EstadoRegistroTerreno).includes(estado as EstadoRegistroTerreno)
+      ? { estado: estado as EstadoRegistroTerreno }
       : {}),
     ...(search
       ? {

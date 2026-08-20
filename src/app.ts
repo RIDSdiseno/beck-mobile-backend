@@ -12,6 +12,8 @@ import jefeobraRoutes from "./routes/jefeobra.routes";
 import obrasRoutes from "./routes/obras.routes";
 import registrosRoutes from "./routes/registros.routes";
 import firematRoutes from "./routes/firemat.routes";
+import adminRoutes from "./routes/admin.routes";
+import { captureAdminActivity } from "./middlewares/actividadAdmin.middleware";
 
 
 const app = express();
@@ -56,6 +58,7 @@ if (env.corsOrigin !== "none") {
   );
 }
 app.use(express.json({ limit: "256kb" }));
+app.use(captureAdminActivity);
 
 app.get("/", (_req, res) => {
   res.json({
@@ -73,6 +76,7 @@ app.use("/api/jefeobra", jefeobraRoutes);
 app.use("/api/obras", obrasRoutes);
 app.use("/api/registros", registrosRoutes);
 app.use("/api/firemat", firematRoutes);
+app.use("/api/admin", adminRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({
