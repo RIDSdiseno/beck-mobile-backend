@@ -211,32 +211,74 @@ function ensureIngenieria(req: Request, res: Response) {
 export async function getIngenieriaResumen(req: Request, res: Response) {
   try {
     if (!ensureIngenieria(req, res)) return;
+    const usuarioId = req.user!.id;
+    const now = new Date();
+    const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
 
-    const grouped = await prisma.registros_terreno.groupBy({
-      by: ["estado"],
-      where: {
-        carga_completa: true,
-      },
-      _count: {
-        _all: true,
-      },
-    });
-
-    const counts = grouped.reduce<Record<string, number>>((acc, item) => {
-      acc[item.estado] = item._count._all;
-      return acc;
-    }, {});
-
-    const total = Object.values(counts).reduce((sum, value) => sum + value, 0);
+    const [
+      pendientesRevision,
+      enRevisionMios,
+      correccionesRecibidas,
+      validadosMes,
+      rechazadosMes,
+    ] = await prisma.$transaction([
+      prisma.registros_terreno.count({
+        where: {
+          carga_completa: true,
+          estado: EstadoRegistroTerreno.en_revision,
+          es_correccion: false,
+          procesamiento_ingenieria: null,
+        },
+      }),
+      prisma.registros_terreno.count({
+        where: {
+          carga_completa: true,
+          estado: EstadoRegistroTerreno.en_revision,
+          procesamiento_ingenieria: { is: { usuario_id: usuarioId } },
+        },
+      }),
+      prisma.registros_terreno.count({
+        where: {
+          carga_completa: true,
+          estado: EstadoRegistroTerreno.en_revision,
+          es_correccion: true,
+          corregido_at: { not: null },
+          procesamiento_ingenieria: null,
+          registros_terreno: {
+            is: {
+              procesamiento_ingenieria: { is: { usuario_id: usuarioId } },
+            },
+          },
+        },
+      }),
+      prisma.registros_terreno.count({
+        where: {
+          carga_completa: true,
+          estado: EstadoRegistroTerreno.validado,
+          procesamiento_ingenieria: {
+            is: { usuario_id: usuarioId, procesado_at: { gte: inicioMes } },
+          },
+        },
+      }),
+      prisma.registros_terreno.count({
+        where: {
+          carga_completa: true,
+          estado: EstadoRegistroTerreno.rechazado,
+          rechazado_por_id: usuarioId,
+          fecha_rechazo: { gte: inicioMes },
+        },
+      }),
+    ]);
 
     return res.json({
       success: true,
       data: {
-        pendientes: counts.pendiente ?? 0,
-        enRevision: counts.en_revision ?? 0,
-        validados: counts.validado ?? 0,
-        rechazados: counts.rechazado ?? 0,
-        total,
+        pendientesRevision,
+        enRevisionMios,
+        correccionesRecibidas,
+        validadosMes,
+        rechazadosMes,
+        revisionesResueltasMes: validadosMes + rechazadosMes,
       },
     });
   } catch (error) {
@@ -377,6 +419,7 @@ export async function iniciarRevisionIngenieria(req: Request, res: Response) {
 
     const currentRegistro = await prisma.registros_terreno.findUnique({
       where: { id: registroId },
+      include: { procesamiento_ingenieria: true },
     });
 
     if (!currentRegistro) {
@@ -394,42 +437,69 @@ export async function iniciarRevisionIngenieria(req: Request, res: Response) {
       });
     }
 
-    if (currentRegistro.estado !== EstadoRegistroTerreno.pendiente) {
+    if (
+      currentRegistro.estado !== EstadoRegistroTerreno.pendiente &&
+      currentRegistro.estado !== EstadoRegistroTerreno.en_revision
+    ) {
       return res.status(400).json({
         success: false,
-        error: "Solo se puede iniciar revisión de un registro pendiente",
+        error: "Solo se puede tomar un registro pendiente o en revisión",
       });
     }
 
-    const transitioned = await prisma.$transaction(async (tx) => {
-      const updated = await tx.registros_terreno.updateMany({
-        where: {
-          id: registroId,
-          estado: EstadoRegistroTerreno.pendiente,
-          carga_completa: true,
-        },
-        data: {
-          estado: EstadoRegistroTerreno.en_revision,
-          devuelto_a_tecnico: false,
-          updated_at: new Date(),
-        },
+    if (
+      currentRegistro.procesamiento_ingenieria &&
+      currentRegistro.procesamiento_ingenieria.usuario_id !== req.user!.id
+    ) {
+      return res.status(409).json({
+        success: false,
+        error: "Este registro ya está siendo revisado por otro ingeniero",
+        code: "REGISTRO_ASIGNADO",
       });
-      if (updated.count !== 1) return false;
+    }
 
-      await tx.procesamiento_ingenieria.upsert({
+    const transitionResult = await prisma.$transaction(async (tx) => {
+      if (currentRegistro.estado === EstadoRegistroTerreno.pendiente) {
+        const updated = await tx.registros_terreno.updateMany({
+          where: {
+            id: registroId,
+            estado: EstadoRegistroTerreno.pendiente,
+            carga_completa: true,
+          },
+          data: {
+            estado: EstadoRegistroTerreno.en_revision,
+            devuelto_a_tecnico: false,
+            updated_at: new Date(),
+          },
+        });
+        if (updated.count !== 1) return "estado_cambiado" as const;
+      }
+
+      if (!currentRegistro.procesamiento_ingenieria) {
+        await tx.procesamiento_ingenieria.createMany({
+          data: [{
+            registro_terreno_id: registroId,
+            usuario_id: req.user!.id,
+          }],
+          skipDuplicates: true,
+        });
+      }
+      const asignacion = await tx.procesamiento_ingenieria.findUnique({
         where: { registro_terreno_id: registroId },
-        create: {
-          registro_terreno_id: registroId,
-          usuario_id: req.user!.id,
-        },
-        update: {
-          usuario_id: req.user!.id,
-          procesado_at: new Date(),
-        },
+        select: { usuario_id: true },
       });
-      return true;
+      return asignacion?.usuario_id === req.user!.id
+        ? "asignado" as const
+        : "asignado_otro" as const;
     });
-    if (!transitioned) {
+    if (transitionResult === "asignado_otro") {
+      return res.status(409).json({
+        success: false,
+        error: "Este registro ya está siendo revisado por otro ingeniero",
+        code: "REGISTRO_ASIGNADO",
+      });
+    }
+    if (transitionResult === "estado_cambiado") {
       return res.status(409).json({
         success: false,
         error: "El registro cambió de estado mientras se iniciaba la revisión",
