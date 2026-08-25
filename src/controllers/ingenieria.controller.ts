@@ -401,7 +401,7 @@ export async function getIngenieriaRegistros(req: Request, res: Response) {
 
     return res.json({
       success: true,
-      data: registros.map(mapRegistroIngenieria),
+      data: await Promise.all(registros.map(mapRegistroIngenieria)),
     });
   } catch (error) {
     console.error("GET INGENIERIA REGISTROS ERROR:", error);
