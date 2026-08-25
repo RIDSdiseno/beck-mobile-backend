@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { Request, Response } from "express";
 import { prisma } from "../config/prisma";
+import { getUtcRangeForLocalDate } from "../utils/timezoneDate";
 
 function requireAdmin(req: Request, res: Response) {
   if (!req.user?.id) {
@@ -52,14 +53,15 @@ export async function getAdminActividad(req: Request, res: Response) {
     const modulo = String(req.query.modulo ?? "").trim();
     const cursor = String(req.query.cursor ?? "").trim();
     const limit = parseLimit(req.query.limit);
+    const fechaRange = getUtcRangeForLocalDate(fecha);
     const where: Prisma.actividad_appWhereInput = {
       usuario_id: userId,
       ...(modulo && modulo !== "todos" ? { modulo } : {}),
-      ...(fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha)
+      ...(fechaRange
         ? {
             created_at: {
-              gte: new Date(`${fecha}T00:00:00.000Z`),
-              lt: new Date(`${fecha}T23:59:59.999Z`),
+              gte: fechaRange.start,
+              lt: fechaRange.end,
             },
           }
         : {}),

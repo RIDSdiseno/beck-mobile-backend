@@ -11,7 +11,11 @@ import {
   uploadBufferToCloudinary,
   withPrivateImageUrl,
 } from "../services/cloudinary.service";
-import { calcularCamposConConfiguracion } from "../services/calculosRegistroTerreno.service";
+import {
+  calcularCamposConConfiguracion,
+  getFactoresAislacionObra,
+} from "../services/calculosRegistroTerreno.service";
+import { resolveEstadoAislacionDesdeFactor } from "../utils/calculosRegistroTerreno";
 import { buildCloudinaryFolder } from "./registros.controller";
 
 const MIN_CONTROL_INSPECCION_FOTOS = 1;
@@ -107,9 +111,14 @@ function normalizeRegistroFotos(registro: {
   });
 }
 
-function mapRegistroIngenieria(registro: any) {
+async function mapRegistroIngenieria(registro: any) {
+  const factoresAislacion = await getFactoresAislacionObra(registro.obra_id);
   return {
     ...registro,
+    aislacion_aplica: resolveEstadoAislacionDesdeFactor(
+      registro.aislacion,
+      factoresAislacion,
+    ),
     fotos: normalizeRegistroFotos(registro),
     obra: registro.obras ?? null,
     usuario: registro.usuarios ?? null,
@@ -511,7 +520,7 @@ export async function iniciarRevisionIngenieria(req: Request, res: Response) {
 
     return res.json({
       success: true,
-      data: mapRegistroIngenieria(registro),
+      data: await mapRegistroIngenieria(registro),
       message: "Registro en revisión",
     });
   } catch (error) {
@@ -762,7 +771,7 @@ export async function updateRegistroIngenieria(req: Request, res: Response) {
 
     return res.json({
       success: true,
-      data: mapRegistroIngenieria(registro),
+      data: await mapRegistroIngenieria(registro),
       message: "Registro actualizado",
     });
   } catch (error) {
@@ -871,7 +880,7 @@ export async function validarRegistroIngenieria(req: Request, res: Response) {
 
     return res.json({
       success: true,
-      data: mapRegistroIngenieria(registro),
+      data: await mapRegistroIngenieria(registro),
       message: "Registro validado",
     });
   } catch (error) {
@@ -1050,7 +1059,7 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
     return res.json({
       success: true,
       data: {
-        registro: mapRegistroIngenieria(registro),
+        registro: await mapRegistroIngenieria(registro),
         correccionId: result.copia.id,
       },
       message: "Registro rechazado y copia creada para corrección",
@@ -1088,7 +1097,7 @@ export async function getIngenieriaRegistroById(req: Request, res: Response) {
       return res.status(404).json({ success: false, error: "Registro no encontrado" });
     }
 
-    return res.json({ success: true, data: mapRegistroIngenieria(registro) });
+    return res.json({ success: true, data: await mapRegistroIngenieria(registro) });
   } catch (error) {
     console.error("GET INGENIERIA REGISTRO BY ID ERROR:", error);
     return res.status(500).json({ success: false, error: "No se pudo obtener el registro" });
@@ -1131,7 +1140,7 @@ export async function marcarInspeccionIngenieria(req: Request, res: Response) {
 
     const registro = await findRegistroWithDetails(registroId);
 
-    return res.json({ success: true, data: mapRegistroIngenieria(registro) });
+    return res.json({ success: true, data: await mapRegistroIngenieria(registro) });
   } catch (error) {
     console.error("MARCAR INSPECCION ERROR:", error);
     return res.status(500).json({ success: false, error: "No se pudo actualizar la inspección" });

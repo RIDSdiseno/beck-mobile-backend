@@ -9,6 +9,11 @@ import {
 import { findRegistroWithDetails } from "./ingenieria.controller";
 import { generateRegistroPdfBuffer } from "./registroPdf.controller";
 import { obtenerConfiguracionRegistro } from "../services/configuracionCamposRegistro.service";
+import { getFactoresAislacionObra } from "../services/calculosRegistroTerreno.service";
+import {
+  type FactorAislacionEstado,
+  resolveEstadoAislacionDesdeFactor,
+} from "../utils/calculosRegistroTerreno";
 
 function requireCliente(req: Request, res: Response) {
   const userId   = req.user?.id;
@@ -98,7 +103,10 @@ function normalizeFotos(registro: {
   });
 }
 
-function normalizeRegistroCliente(registro: any) {
+function normalizeRegistroCliente(
+  registro: any,
+  factoresAislacion?: FactorAislacionEstado[],
+) {
   const ejeParts = [registro.eje_alfabetico, registro.eje_numerico]
     .filter(Boolean)
     .map((v: any) => String(v).trim());
@@ -131,6 +139,10 @@ function normalizeRegistroCliente(registro: any) {
     accesibilidad:             registro.accesibilidad,
     cantidadSellosConFactores: registro.cantidad_sellos_con_factores ? Number(registro.cantidad_sellos_con_factores) : null,
     aislacion:                 registro.aislacion             ? Number(registro.aislacion)             : null,
+    aislacionAplica:           resolveEstadoAislacionDesdeFactor(
+      registro.aislacion,
+      factoresAislacion,
+    ),
     cantidadSellosAislacion:   registro.cantidad_sellos_aislacion    ? Number(registro.cantidad_sellos_aislacion)    : null,
     reparacionTabique:         registro.reparacion_tabique != null ? Number(registro.reparacion_tabique) : null,
     folio:                     registro.folio,
@@ -153,6 +165,19 @@ function normalizeRegistroCliente(registro: any) {
     obraCodigo:                registro.obras?.codigo  ?? null,
     obraId:                    registro.obra_id,
   };
+}
+
+async function normalizeRegistrosCliente(registros: any[]) {
+  const obraIds = [...new Set(registros.map((registro) => registro.obra_id).filter(Boolean))];
+  const factoresPorObra = new Map(
+    await Promise.all(
+      obraIds.map(async (obraId) => [obraId, await getFactoresAislacionObra(obraId)] as const),
+    ),
+  );
+
+  return registros.map((registro) =>
+    normalizeRegistroCliente(registro, factoresPorObra.get(registro.obra_id)),
+  );
 }
 
 // ── Obras del cliente ────────────────────────────────────────────────────────────
@@ -286,7 +311,7 @@ export async function getClienteRegistrosObra(req: Request, res: Response) {
       orderBy: { fecha: "desc" },
     });
 
-    return res.json({ success: true, data: registros.map(normalizeRegistroCliente) });
+    return res.json({ success: true, data: await normalizeRegistrosCliente(registros) });
   } catch (error) {
     console.error("GET CLIENTE REGISTROS OBRA ERROR:", error);
     return res.status(500).json({ success: false, error: "No se pudieron obtener los registros del cliente" });
@@ -341,7 +366,7 @@ export async function getClienteHistorial(req: Request, res: Response) {
         select: { ...REGISTRO_SELECT, obras: { select: { nombre: true, codigo: true } } },
         orderBy: { validado_cliente_at: "desc" },
       });
-      return res.json({ success: true, data: registros.map(normalizeRegistroCliente) });
+      return res.json({ success: true, data: await normalizeRegistrosCliente(registros) });
     }
 
     const [rows, total, historialObras] = await prisma.$transaction([
@@ -371,7 +396,7 @@ export async function getClienteHistorial(req: Request, res: Response) {
     return res.json({
       success: true,
       data: {
-        items: pageRows.map(normalizeRegistroCliente),
+        items: pageRows.map((registro) => normalizeRegistroCliente(registro)),
         total,
         nextCursor: hasMore ? pageRows[pageRows.length - 1]?.id ?? null : null,
         obras: historialObras.map((item) => ({ id: item.obra_id, nombre: item.obras.nombre })),
@@ -394,7 +419,11 @@ export async function getClienteRegistroDetalle(req: Request, res: Response) {
       select: { ...REGISTRO_SELECT, obras: { select: { nombre: true, codigo: true } } },
     });
     if (!registro) return res.status(404).json({ success: false, error: "Registro no encontrado" });
-    return res.json({ success: true, data: normalizeRegistroCliente(registro) });
+    const factoresAislacion = await getFactoresAislacionObra(registro.obra_id);
+    return res.json({
+      success: true,
+      data: normalizeRegistroCliente(registro, factoresAislacion),
+    });
   } catch (error) {
     console.error("GET CLIENTE REGISTRO DETALLE ERROR:", error);
     return res.status(500).json({ success: false, error: "No se pudo obtener el detalle" });
@@ -532,7 +561,11 @@ export async function validarRegistroCliente(req: Request, res: Response) {
       },
     });
 
-    return res.json({ success: true, data: normalizeRegistroCliente(updated) });
+    const factoresAislacion = await getFactoresAislacionObra(updated.obra_id);
+    return res.json({
+      success: true,
+      data: normalizeRegistroCliente(updated, factoresAislacion),
+    });
   } catch (error) {
     console.error("VALIDAR REGISTRO CLIENTE ERROR:", error);
     return res.status(500).json({ success: false, error: "No se pudo validar el registro" });

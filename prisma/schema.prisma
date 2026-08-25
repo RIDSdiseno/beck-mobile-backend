@@ -524,9 +524,9 @@ model actividad_app {
   ruta         String   @db.VarChar(255)
   datos        Json?
   created_at   DateTime @default(now()) @db.Timestamp(6)
-  usuarios     usuarios @relation(fields: [usuario_id], references: [id], onDelete: Cascade)
+  usuarios     usuarios @relation(fields: [usuario_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
-  @@index([usuario_id, created_at(sort: Desc)])
+  @@index([usuario_id, created_at(sort: Desc)], map: "actividad_app_usuario_created_at_idx")
   @@index([modulo])
   @@index([accion])
   @@index([entidad_id])
