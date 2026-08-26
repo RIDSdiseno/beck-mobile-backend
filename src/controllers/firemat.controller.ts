@@ -6,6 +6,7 @@ import {
   normalizeFirematBarcode,
   parseUnitsPerBox,
 } from "../services/firematBarcode.service";
+import { buildRecepcionDetalleParams } from "../services/firematReception.service";
 
 type ProductoRow = {
   id: number;
@@ -484,7 +485,17 @@ export async function asociarCodigoBarraFiremat(req: Request, res: Response) {
   }
 }
 
-type RecepcionItemInput = { codigo?: unknown; cantidadEscaneos?: unknown };
+type RecepcionItemInput = {
+  codigo?: unknown;
+  cantidadEscaneos?: unknown;
+  unidadesIngresadas?: unknown;
+};
+
+type RecepcionItemConsolidado = {
+  cantidadEscaneos: number;
+  cantidadEscaneosEstandar: number;
+  unidadesAjustadas: number;
+};
 
 export async function createRecepcionEscaneoFiremat(req: Request, res: Response) {
   try {
@@ -499,14 +510,29 @@ export async function createRecepcionEscaneoFiremat(req: Request, res: Response)
       return res.status(400).json({ success: false, error: "La recepción o sus productos no son válidos" });
     }
 
-    const consolidated = new Map<string, number>();
+    const consolidated = new Map<string, RecepcionItemConsolidado>();
     for (const item of rawItems) {
       const codigo = normalizeFirematBarcode(item.codigo);
       const cantidadEscaneos = parseUnitsPerBox(item.cantidadEscaneos);
-      if (!codigo || !cantidadEscaneos || cantidadEscaneos > 10_000) {
+      const hasUnitAdjustment = item.unidadesIngresadas !== undefined && item.unidadesIngresadas !== null;
+      const unidadesIngresadas = hasUnitAdjustment ? parseUnitsPerBox(item.unidadesIngresadas) : null;
+      if (
+        !codigo ||
+        !cantidadEscaneos ||
+        cantidadEscaneos > 10_000 ||
+        (hasUnitAdjustment && (!unidadesIngresadas || unidadesIngresadas > 1_000_000))
+      ) {
         return res.status(400).json({ success: false, error: "Existe una lectura con cantidad inválida" });
       }
-      consolidated.set(codigo, (consolidated.get(codigo) ?? 0) + cantidadEscaneos);
+      const current = consolidated.get(codigo) ?? {
+        cantidadEscaneos: 0,
+        cantidadEscaneosEstandar: 0,
+        unidadesAjustadas: 0,
+      };
+      current.cantidadEscaneos += cantidadEscaneos;
+      if (hasUnitAdjustment) current.unidadesAjustadas += unidadesIngresadas!;
+      else current.cantidadEscaneosEstandar += cantidadEscaneos;
+      consolidated.set(codigo, current);
     }
 
     const result = await withFirematTransaction(async (client) => {
@@ -534,13 +560,28 @@ export async function createRecepcionEscaneoFiremat(req: Request, res: Response)
 
       const byProduct = new Map<
         number,
-        { unidades: number; details: Array<{ codigo: string; escaneos: number; unidadesPorEscaneo: number }> }
+        {
+          unidades: number;
+          details: Array<{
+            codigo: string;
+            escaneos: number;
+            unidadesPorEscaneo: number;
+            unidadesIngresadas: number;
+          }>;
+        }
       >();
       for (const mapping of mappings.rows) {
-        const escaneos = consolidated.get(mapping.codigo)!;
+        const item = consolidated.get(mapping.codigo)!;
+        const unidadesIngresadas =
+          item.unidadesAjustadas + item.cantidadEscaneosEstandar * mapping.unidadesPorEscaneo;
         const current = byProduct.get(mapping.productoId) ?? { unidades: 0, details: [] };
-        current.unidades += escaneos * mapping.unidadesPorEscaneo;
-        current.details.push({ codigo: mapping.codigo, escaneos, unidadesPorEscaneo: mapping.unidadesPorEscaneo });
+        current.unidades += unidadesIngresadas;
+        current.details.push({
+          codigo: mapping.codigo,
+          escaneos: item.cantidadEscaneos,
+          unidadesPorEscaneo: mapping.unidadesPorEscaneo,
+          unidadesIngresadas,
+        });
         byProduct.set(mapping.productoId, current);
       }
 
@@ -576,15 +617,16 @@ export async function createRecepcionEscaneoFiremat(req: Request, res: Response)
                ("recepcionId", "productoId", codigo, "cantidadEscaneos", "unidadesPorEscaneo",
                 "unidadesIngresadas", "stockAnterior", "stockNuevo", "createdAt")
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())`,
-            [
+            buildRecepcionDetalleParams({
               recepcionId,
               productoId,
-              detail.codigo,
-              detail.escaneos,
-              detail.escaneos * detail.unidadesPorEscaneo,
+              codigo: detail.codigo,
+              cantidadEscaneos: detail.escaneos,
+              unidadesPorEscaneo: detail.unidadesPorEscaneo,
+              unidadesIngresadas: detail.unidadesIngresadas,
               stockAnterior,
               stockNuevo,
-            ],
+            }),
           );
         }
         const product = await client.query<ProductoRow>(`${PRODUCT_SELECT} WHERE p.id = $1`, [productoId]);
