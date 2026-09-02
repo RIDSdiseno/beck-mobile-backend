@@ -509,6 +509,13 @@ export async function getMisRegistros(req: Request, res: Response) {
       : vistaAdministrador === "operario"
         ? "terreno"
         : userRole;
+    const paginatedSupervisorView =
+      operationalRole === "jefeobra" &&
+      scope === "registro" &&
+      req.query.paginated === "true";
+    const cursor = normalizeText(req.query.cursor);
+    const search = normalizeText(req.query.search);
+    const limit = parseHistorialLimit(req.query.limit);
 
     if (!userId) {
       return res.status(401).json({
@@ -525,6 +532,74 @@ export async function getMisRegistros(req: Request, res: Response) {
         error: `Estado no válido. Valores aceptados: ${ESTADOS_VALIDOS.join(", ")}`,
       });
     }
+
+    if (paginatedSupervisorView && cursor && !/^[0-9a-f-]{36}$/i.test(cursor)) {
+      return res.status(400).json({
+        success: false,
+        error: "Cursor de paginación no válido",
+      });
+    }
+
+    const registroCodeMatch = search.match(/^reg[-\s]*([0-9a-f]{1,32})$/i);
+    const plainRegistroCodeMatch = search.match(/^([0-9a-f]{6})$/i);
+    const registroCodePrefix =
+      registroCodeMatch?.[1] ?? plainRegistroCodeMatch?.[1] ?? "";
+    const registroIds =
+      paginatedSupervisorView && registroCodePrefix
+        ? await prisma.$queryRaw<Array<{ id: string }>>`
+            SELECT id::text AS id
+            FROM registros_terreno
+            WHERE id::text ILIKE ${`${registroCodePrefix}%`}
+            LIMIT 100
+          `
+        : [];
+    const searchFilter: Prisma.registros_terrenoWhereInput | undefined =
+      paginatedSupervisorView && search
+        ? {
+            OR: [
+              { numero_sello: { contains: search, mode: "insensitive" } },
+              { piso: { contains: search, mode: "insensitive" } },
+              { eje_numerico: { contains: search, mode: "insensitive" } },
+              { eje_alfabetico: { contains: search, mode: "insensitive" } },
+              { nombre_sellador: { contains: search, mode: "insensitive" } },
+              { usuarios: { nombre: { contains: search, mode: "insensitive" } } },
+              ...(registroIds.length > 0
+                ? [{ id: { in: registroIds.map((registro) => registro.id) } }]
+                : []),
+            ],
+          }
+        : undefined;
+    const supervisorPendingFilter: Prisma.registros_terrenoWhereInput[] = [
+      {
+        estado: EstadoRegistroTerreno.pendiente,
+        es_correccion: false,
+      },
+      {
+        estado: EstadoRegistroTerreno.pendiente,
+        es_correccion: true,
+        devuelto_a_tecnico: false,
+        corregido_at: { not: null },
+      },
+    ];
+    const supervisorRejectedFilter: Prisma.registros_terrenoWhereInput[] = [
+      { estado: EstadoRegistroTerreno.rechazado },
+      {
+        estado: EstadoRegistroTerreno.pendiente,
+        es_correccion: true,
+        devuelto_a_tecnico: false,
+        corregido_at: null,
+      },
+    ];
+    const supervisorAllFilter = [
+      ...supervisorPendingFilter,
+      ...supervisorRejectedFilter,
+    ];
+    const supervisorSelectedFilter =
+      estado === EstadoRegistroTerreno.pendiente
+        ? supervisorPendingFilter
+        : estado === EstadoRegistroTerreno.rechazado
+          ? supervisorRejectedFilter
+          : supervisorAllFilter;
 
     const visibilidadTerreno = {
       OR: [
@@ -544,24 +619,14 @@ export async function getMisRegistros(req: Request, res: Response) {
             ...(scope === "registro"
               ? {
                   other_registros_terreno: { none: {} },
-                  OR: [
-                    {
-                      estado: EstadoRegistroTerreno.pendiente,
-                      es_correccion: false,
-                    },
-                    {
-                      estado: EstadoRegistroTerreno.pendiente,
-                      es_correccion: true,
-                      devuelto_a_tecnico: false,
-                    },
-                    {
-                      estado: EstadoRegistroTerreno.rechazado,
-                    },
-                  ],
+                  ...(searchFilter ? { AND: [searchFilter] } : {}),
+                  OR: supervisorSelectedFilter,
                 }
               : {}),
             ...(obraId ? { obra_id: obraId } : {}),
-            ...(estado ? { estado: estado as EstadoRegistroTerreno } : {}),
+            ...(!paginatedSupervisorView && estado
+              ? { estado: estado as EstadoRegistroTerreno }
+              : {}),
             obras: {
               estado: {
                 in: [EstadoObra.activa, EstadoObra.pausada],
@@ -602,12 +667,15 @@ export async function getMisRegistros(req: Request, res: Response) {
               : {}),
           };
 
-    const registros = await prisma.registros_terreno.findMany({
+    const registrosResult = await prisma.registros_terreno.findMany({
       where,
-      orderBy: {
-        created_at: "desc",
-      },
-      take: 100,
+      orderBy: paginatedSupervisorView
+        ? [{ created_at: "desc" }, { id: "desc" }]
+        : { created_at: "desc" },
+      take: paginatedSupervisorView ? limit + 1 : 100,
+      ...(paginatedSupervisorView && cursor
+        ? { cursor: { id: cursor }, skip: 1 }
+        : {}),
       include: {
         obras: {
           select: {
@@ -673,6 +741,41 @@ export async function getMisRegistros(req: Request, res: Response) {
       },
     });
 
+    const hasMore = paginatedSupervisorView && registrosResult.length > limit;
+    const registros = paginatedSupervisorView
+      ? registrosResult.slice(0, limit)
+      : registrosResult;
+
+    let supervisorPagination:
+      | {
+          total: number;
+          nextCursor: string | null;
+          counts: { todos: number; pendiente: number; rechazado: number };
+        }
+      | undefined;
+
+    if (paginatedSupervisorView) {
+      const allCountWhere = { ...where, OR: supervisorAllFilter };
+      const pendingCountWhere = { ...where, OR: supervisorPendingFilter };
+      const rejectedCountWhere = { ...where, OR: supervisorRejectedFilter };
+      const [todos, pendiente, rechazado] = await Promise.all([
+        prisma.registros_terreno.count({ where: allCountWhere }),
+        prisma.registros_terreno.count({ where: pendingCountWhere }),
+        prisma.registros_terreno.count({ where: rejectedCountWhere }),
+      ]);
+      const total =
+        estado === EstadoRegistroTerreno.pendiente
+          ? pendiente
+          : estado === EstadoRegistroTerreno.rechazado
+            ? rechazado
+            : todos;
+      supervisorPagination = {
+        total,
+        nextCursor: hasMore ? registros[registros.length - 1]?.id ?? null : null,
+        counts: { todos, pendiente, rechazado },
+      };
+    }
+
     const factoresAislacionPorObra = new Map(
       await Promise.all(
         [...new Set(registros.map((registro) => registro.obra_id))].map(
@@ -723,9 +826,7 @@ export async function getMisRegistros(req: Request, res: Response) {
       return normalized;
     };
 
-    return res.json({
-      success: true,
-      data: registros.map((registro) => {
+    const responseData = registros.map((registro) => {
         const registroOrigen = registro.registros_terreno
           ? {
               ...registro.registros_terreno,
@@ -744,7 +845,13 @@ export async function getMisRegistros(req: Request, res: Response) {
             registro.usuarios_registros_terreno_rechazado_por_idTousuarios,
           registro_origen: registroOrigen,
         };
-      }),
+      });
+
+    return res.json({
+      success: true,
+      data: supervisorPagination
+        ? { items: responseData, ...supervisorPagination }
+        : responseData,
     });
   } catch (error) {
     console.error("GET MIS REGISTROS ERROR:", error);
