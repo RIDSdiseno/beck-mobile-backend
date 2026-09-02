@@ -66,6 +66,7 @@ describe("getMisRegistros para supervisor", () => {
         where: expect.objectContaining({
           carga_completa: true,
           obra_id: "obra-1",
+          other_registros_terreno: { none: {} },
           OR: [
             {
               estado: "pendiente",

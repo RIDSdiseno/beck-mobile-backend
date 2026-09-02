@@ -543,6 +543,7 @@ export async function getMisRegistros(req: Request, res: Response) {
               : {}),
             ...(scope === "registro"
               ? {
+                  other_registros_terreno: { none: {} },
                   OR: [
                     {
                       estado: EstadoRegistroTerreno.pendiente,
