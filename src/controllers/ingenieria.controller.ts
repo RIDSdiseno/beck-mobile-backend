@@ -21,8 +21,7 @@ import { buildCloudinaryFolder } from "./registros.controller";
 const MIN_CONTROL_INSPECCION_FOTOS = 1;
 const MAX_CONTROL_INSPECCION_FOTOS = 5;
 
-const ESTADOS_INGENIERIA = [
-  EstadoRegistroTerreno.pendiente,
+const ESTADOS_INGENIERIA: EstadoRegistroTerreno[] = [
   EstadoRegistroTerreno.en_revision,
   EstadoRegistroTerreno.validado,
   EstadoRegistroTerreno.rechazado,
@@ -307,11 +306,16 @@ export async function getIngenieriaRegistros(req: Request, res: Response) {
     const estado = normalizeText(req.query.estado);
     const search = normalizeText(req.query.search).toLowerCase();
     const obraId = normalizeText(req.query.obraId);
+    const fecha = normalizeText(req.query.fecha);
+    const cursor = normalizeText(req.query.cursor);
+    const paginated = req.query.paginated === "true";
     const limitValue = Number(req.query.limit);
     const take =
       Number.isFinite(limitValue) && limitValue > 0
-        ? Math.min(Math.trunc(limitValue), 100)
-        : 80;
+        ? Math.min(Math.trunc(limitValue), paginated ? 50 : 100)
+        : paginated
+          ? 30
+          : 80;
 
     if (estado && !ESTADOS_INGENIERIA.includes(estado as EstadoRegistroTerreno)) {
       return res.status(400).json({
@@ -320,43 +324,86 @@ export async function getIngenieriaRegistros(req: Request, res: Response) {
       });
     }
 
-    const registros = await prisma.registros_terreno.findMany({
-      where: {
-        carga_completa: true,
-        ...(estado ? { estado: estado as EstadoRegistroTerreno } : {}),
-        ...(obraId ? { obra_id: obraId } : {}),
-        ...(search
-          ? {
-              OR: [
-                { folio: { contains: search, mode: "insensitive" } },
-                { codigo_beck: { contains: search, mode: "insensitive" } },
-                { itemizado_beck: { contains: search, mode: "insensitive" } },
-                { descripcion_material: { contains: search, mode: "insensitive" } },
-                { numero_sello: { contains: search, mode: "insensitive" } },
-                { nombre_sellador: { contains: search, mode: "insensitive" } },
-                {
-                  obras: {
-                    nombre: { contains: search, mode: "insensitive" },
-                  },
-                },
-                {
-                  obras: {
-                    codigo: { contains: search, mode: "insensitive" },
-                  },
-                },
-                {
-                  usuarios: {
-                    nombre: { contains: search, mode: "insensitive" },
-                  },
-                },
-              ],
-            }
-          : {}),
-      },
-      orderBy: {
-        created_at: "desc",
-      },
-      take,
+    if (fecha && !/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+      return res.status(400).json({
+        success: false,
+        error: "Fecha no válida",
+      });
+    }
+
+    if (paginated && cursor && !/^[0-9a-f-]{36}$/i.test(cursor)) {
+      return res.status(400).json({
+        success: false,
+        error: "Cursor de paginación no válido",
+      });
+    }
+
+    const registroCodeMatch = search.match(/^reg[-\s]*([0-9a-f]{1,32})$/i);
+    const plainRegistroCodeMatch = search.match(/^([0-9a-f]{6})$/i);
+    const registroCodePrefix =
+      registroCodeMatch?.[1] ?? plainRegistroCodeMatch?.[1] ?? "";
+    const registroIds =
+      search && registroCodePrefix
+        ? await prisma.$queryRaw<Array<{ id: string }>>`
+            SELECT id::text AS id
+            FROM registros_terreno
+            WHERE id::text ILIKE ${`${registroCodePrefix}%`}
+            LIMIT 100
+          `
+        : [];
+
+    const searchFilter: Prisma.registros_terrenoWhereInput | undefined = search
+      ? {
+          OR: [
+            { folio: { contains: search, mode: "insensitive" } },
+            { codigo_beck: { contains: search, mode: "insensitive" } },
+            { itemizado_beck: { contains: search, mode: "insensitive" } },
+            { descripcion_material: { contains: search, mode: "insensitive" } },
+            { numero_sello: { contains: search, mode: "insensitive" } },
+            { nombre_sellador: { contains: search, mode: "insensitive" } },
+            { piso: { contains: search, mode: "insensitive" } },
+            { eje_numerico: { contains: search, mode: "insensitive" } },
+            { eje_alfabetico: { contains: search, mode: "insensitive" } },
+            {
+              obras: {
+                nombre: { contains: search, mode: "insensitive" },
+              },
+            },
+            {
+              obras: {
+                codigo: { contains: search, mode: "insensitive" },
+              },
+            },
+            {
+              usuarios: {
+                nombre: { contains: search, mode: "insensitive" },
+              },
+            },
+            ...(registroIds.length > 0
+              ? [{ id: { in: registroIds.map((registro) => registro.id) } }]
+              : []),
+          ],
+        }
+      : undefined;
+    const baseWhere: Prisma.registros_terrenoWhereInput = {
+      carga_completa: true,
+      estado: { in: ESTADOS_INGENIERIA },
+      ...(obraId ? { obra_id: obraId } : {}),
+      ...(fecha ? { fecha: new Date(`${fecha}T00:00:00.000Z`) } : {}),
+      ...(searchFilter ? { AND: [searchFilter] } : {}),
+    };
+    const where: Prisma.registros_terrenoWhereInput = {
+      ...baseWhere,
+      ...(estado ? { estado: estado as EstadoRegistroTerreno } : {}),
+    };
+
+    const registrosResult = await prisma.registros_terreno.findMany({
+      where,
+      orderBy: paginated
+        ? [{ created_at: "desc" }, { id: "desc" }]
+        : { created_at: "desc" },
+      take: paginated ? take + 1 : take,
+      ...(paginated && cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       include: {
         obras: {
           select: {
@@ -399,9 +446,68 @@ export async function getIngenieriaRegistros(req: Request, res: Response) {
       },
     });
 
+    const hasMore = paginated && registrosResult.length > take;
+    const registros = paginated
+      ? registrosResult.slice(0, take)
+      : registrosResult;
+    const items = await Promise.all(registros.map(mapRegistroIngenieria));
+
+    if (paginated) {
+      const [todos, enRevision, validados, rechazados, obras] = await Promise.all([
+        prisma.registros_terreno.count({ where: baseWhere }),
+        prisma.registros_terreno.count({
+          where: { AND: [baseWhere, { estado: EstadoRegistroTerreno.en_revision }] },
+        }),
+        prisma.registros_terreno.count({
+          where: { AND: [baseWhere, { estado: EstadoRegistroTerreno.validado }] },
+        }),
+        prisma.registros_terreno.count({
+          where: { AND: [baseWhere, { estado: EstadoRegistroTerreno.rechazado }] },
+        }),
+        prisma.obras.findMany({
+          where: {
+            registros_terreno: {
+              some: {
+                carga_completa: true,
+                estado: { in: ESTADOS_INGENIERIA },
+              },
+            },
+          },
+          select: { id: true, nombre: true, codigo: true },
+          orderBy: { nombre: "asc" },
+        }),
+      ]);
+      const total =
+        estado === EstadoRegistroTerreno.en_revision
+          ? enRevision
+          : estado === EstadoRegistroTerreno.validado
+            ? validados
+            : estado === EstadoRegistroTerreno.rechazado
+              ? rechazados
+              : todos;
+
+      return res.json({
+        success: true,
+        data: {
+          items,
+          total,
+          nextCursor: hasMore
+            ? registros[registros.length - 1]?.id ?? null
+            : null,
+          counts: {
+            todos,
+            en_revision: enRevision,
+            validado: validados,
+            rechazado: rechazados,
+          },
+          obras,
+        },
+      });
+    }
+
     return res.json({
       success: true,
-      data: await Promise.all(registros.map(mapRegistroIngenieria)),
+      data: items,
     });
   } catch (error) {
     console.error("GET INGENIERIA REGISTROS ERROR:", error);
@@ -446,13 +552,10 @@ export async function iniciarRevisionIngenieria(req: Request, res: Response) {
       });
     }
 
-    if (
-      currentRegistro.estado !== EstadoRegistroTerreno.pendiente &&
-      currentRegistro.estado !== EstadoRegistroTerreno.en_revision
-    ) {
+    if (currentRegistro.estado !== EstadoRegistroTerreno.en_revision) {
       return res.status(400).json({
         success: false,
-        error: "Solo se puede tomar un registro pendiente o en revisión",
+        error: "Solo se puede tomar un registro enviado a revisión por el supervisor",
       });
     }
 
@@ -468,22 +571,6 @@ export async function iniciarRevisionIngenieria(req: Request, res: Response) {
     }
 
     const transitionResult = await prisma.$transaction(async (tx) => {
-      if (currentRegistro.estado === EstadoRegistroTerreno.pendiente) {
-        const updated = await tx.registros_terreno.updateMany({
-          where: {
-            id: registroId,
-            estado: EstadoRegistroTerreno.pendiente,
-            carga_completa: true,
-          },
-          data: {
-            estado: EstadoRegistroTerreno.en_revision,
-            devuelto_a_tecnico: false,
-            updated_at: new Date(),
-          },
-        });
-        if (updated.count !== 1) return "estado_cambiado" as const;
-      }
-
       if (!currentRegistro.procesamiento_ingenieria) {
         await tx.procesamiento_ingenieria.createMany({
           data: [{
@@ -508,14 +595,6 @@ export async function iniciarRevisionIngenieria(req: Request, res: Response) {
         code: "REGISTRO_ASIGNADO",
       });
     }
-    if (transitionResult === "estado_cambiado") {
-      return res.status(409).json({
-        success: false,
-        error: "El registro cambió de estado mientras se iniciaba la revisión",
-        code: "ESTADO_CONFLICTO",
-      });
-    }
-
     const registro = await findRegistroWithDetails(registroId);
 
     return res.json({
