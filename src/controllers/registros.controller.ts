@@ -541,6 +541,24 @@ export async function getMisRegistros(req: Request, res: Response) {
             ...(scope === "historial"
               ? { enviado_ingenieria_por_id: userId }
               : {}),
+            ...(scope === "registro"
+              ? {
+                  OR: [
+                    {
+                      estado: EstadoRegistroTerreno.pendiente,
+                      es_correccion: false,
+                    },
+                    {
+                      estado: EstadoRegistroTerreno.pendiente,
+                      es_correccion: true,
+                      devuelto_a_tecnico: false,
+                    },
+                    {
+                      estado: EstadoRegistroTerreno.rechazado,
+                    },
+                  ],
+                }
+              : {}),
             ...(obraId ? { obra_id: obraId } : {}),
             ...(estado ? { estado: estado as EstadoRegistroTerreno } : {}),
             obras: {
