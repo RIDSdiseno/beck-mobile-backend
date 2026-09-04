@@ -6,6 +6,7 @@ type LineaAsignacion = {
   tipoItem: TipoInventarioBeck;
   itemId: string;
   cantidad: number;
+  subSku?: string;
 };
 
 const TIPOS_VALIDOS = new Set<string>(Object.values(TipoInventarioBeck));
@@ -39,6 +40,7 @@ export function parseLineasInventario(raw: unknown): LineaAsignacion[] {
     const tipoItem = typeof linea?.tipoItem === "string" ? linea.tipoItem : "";
     const itemId = typeof linea?.itemId === "string" ? linea.itemId.trim() : "";
     const cantidad = Number(linea?.cantidad);
+    const subSku = typeof linea?.subSku === "string" ? linea.subSku.trim().slice(0, 120) : "";
 
     if (!TIPOS_VALIDOS.has(tipoItem)) {
       throw new InventarioBeckError(`Línea ${index + 1}: tipo de item inválido.`);
@@ -52,15 +54,45 @@ export function parseLineasInventario(raw: unknown): LineaAsignacion[] {
     if (tipoItem === TipoInventarioBeck.herramienta && cantidad !== 1) {
       throw new InventarioBeckError("Las herramientas se asignan de una en una.");
     }
+    if (subSku && cantidad !== 1) {
+      throw new InventarioBeckError("Un código unitario solo permite asignar una unidad.");
+    }
 
-    const clave = `${tipoItem}:${itemId}`;
+    const clave = `${tipoItem}:${itemId}:${subSku || "lote"}`;
     if (repetidos.has(clave)) {
       throw new InventarioBeckError("No repitas el mismo item en una asignación.");
     }
     repetidos.add(clave);
 
-    return { tipoItem: tipoItem as TipoInventarioBeck, itemId, cantidad };
+    return {
+      tipoItem: tipoItem as TipoInventarioBeck,
+      itemId,
+      cantidad,
+      ...(subSku ? { subSku } : {}),
+    };
   });
+}
+
+export function separarSubSkus(
+  disponibles: string[],
+  cantidad: number,
+  subSku?: string,
+): { seleccionados: string[]; restantes: string[] } {
+  const subSkuCanonico = subSku
+    ? disponibles.find((codigo) => codigo.toLocaleLowerCase() === subSku.toLocaleLowerCase())
+    : undefined;
+  if (subSku && !subSkuCanonico) {
+    throw new InventarioBeckError("El código unitario no pertenece al lote disponible.", 409);
+  }
+  return subSkuCanonico
+    ? {
+      seleccionados: [subSkuCanonico],
+      restantes: disponibles.filter((codigo) => codigo !== subSkuCanonico),
+    }
+    : {
+      seleccionados: disponibles.slice(0, cantidad),
+      restantes: disponibles.slice(cantidad),
+    };
 }
 
 const ITEM_SELECT = {
@@ -116,6 +148,7 @@ function serializarItem(asignacion: any) {
     talla: epp?.talla ?? implemento?.talla_medida ?? null,
     color: epp?.color ?? implemento?.color ?? null,
     unidadMedida: epp?.unidad_medida ?? implemento?.unidad_medida ?? null,
+    subSkus: Array.isArray(asignacion.sub_skus) ? asignacion.sub_skus : [],
   };
 }
 
@@ -179,6 +212,7 @@ export async function listarDisponibleSupervisor(supervisorId: string, obraId: s
       implemento_id: true,
       herramienta_id: true,
       cantidad: true,
+      sub_skus: true,
       ...ITEM_SELECT,
     },
     orderBy: { created_at: "asc" },
@@ -189,7 +223,11 @@ export async function listarDisponibleSupervisor(supervisorId: string, obraId: s
     const item = serializarItem(lote);
     const clave = `${item.tipoItem}:${item.itemId}`;
     const anterior = agrupados.get(clave);
-    agrupados.set(clave, { ...item, disponible: (anterior?.disponible ?? 0) + lote.cantidad });
+    agrupados.set(clave, {
+      ...item,
+      subSkus: [...(anterior?.subSkus ?? []), ...item.subSkus],
+      disponible: (anterior?.disponible ?? 0) + lote.cantidad,
+    });
   }
 
   return Array.from(agrupados.values()).sort((a, b) => a.nombre.localeCompare(b.nombre));
@@ -213,6 +251,7 @@ export async function listarEntregadosSupervisor(supervisorId: string, obraId: s
       epp_id: true,
       implemento_id: true,
       herramienta_id: true,
+      sub_skus: true,
       recepcion_confirmada_at: true,
       devolucion_solicitada_at: true,
       devolucion_motivo: true,
@@ -269,6 +308,7 @@ export async function listarAsignacionesOperario(operarioId: string) {
       epp_id: true,
       implemento_id: true,
       herramienta_id: true,
+      sub_skus: true,
       recepcion_confirmada_at: true,
       devolucion_solicitada_at: true,
       devolucion_motivo: true,
@@ -335,7 +375,7 @@ async function ejecutarAsignacion(
         if (yaEntregada) throw new InventarioBeckError("La herramienta ya está entregada a un operario.", 409);
       }
 
-      const lotes = await tx.asignaciones_inventario_beck.findMany({
+      const lotesDisponibles = await tx.asignaciones_inventario_beck.findMany({
         where: {
           jefe_obra_id: supervisorId,
           obra_id: obraId,
@@ -345,9 +385,16 @@ async function ejecutarAsignacion(
         },
         orderBy: { created_at: "asc" },
       });
+      const subSkuBuscado = linea.subSku?.toLocaleLowerCase();
+      const lotes = subSkuBuscado
+        ? lotesDisponibles.filter((lote) => lote.sub_skus.some((codigo) => codigo.toLocaleLowerCase() === subSkuBuscado))
+        : lotesDisponibles;
 
       const disponible = lotes.reduce((total, lote) => total + lote.cantidad, 0);
       if (disponible < linea.cantidad) {
+        if (linea.subSku) {
+          throw new InventarioBeckError("El código escaneado ya no está disponible contigo en esta obra.", 409);
+        }
         throw new InventarioBeckError(`Stock insuficiente para la asignación (disponible: ${disponible}).`, 409);
       }
 
@@ -382,12 +429,18 @@ async function ejecutarAsignacion(
             accion: "ASIGNADO_OPERARIO",
             cantidad: cantidadMover,
             detalle: "Supervisor entregó el artículo al operario",
+            datos: lote.sub_skus.length ? { subSkus: lote.sub_skus } : undefined,
           });
           creadas.push(lote.id);
         } else {
+          const { seleccionados: subSkusAMover, restantes: subSkusRestantes } = separarSubSkus(
+            lote.sub_skus,
+            cantidadMover,
+            linea.subSku,
+          );
           const reducida = await tx.asignaciones_inventario_beck.updateMany({
             where: { id: lote.id, trabajador_id: null, estado: "asignado", cantidad: lote.cantidad },
-            data: { cantidad: { decrement: cantidadMover } },
+            data: { cantidad: { decrement: cantidadMover }, sub_skus: subSkusRestantes },
           });
           if (reducida.count !== 1) throw new InventarioBeckError("El stock cambió mientras asignabas. Intenta nuevamente.", 409);
 
@@ -405,6 +458,7 @@ async function ejecutarAsignacion(
               observacion: observacion ?? lote.observacion,
               trabajador_id: trabajadorId,
               reasignado_at: new Date(),
+              sub_skus: subSkusAMover,
             },
           });
           await registrarEvento(tx, {
@@ -416,7 +470,7 @@ async function ejecutarAsignacion(
             accion: "ASIGNADO_OPERARIO",
             cantidad: cantidadMover,
             detalle: "Supervisor entregó el artículo al operario",
-            datos: { asignacionOrigenId: lote.id },
+            datos: { asignacionOrigenId: lote.id, subSkus: subSkusAMover },
           });
           creadas.push(creada.id);
         }
@@ -505,6 +559,7 @@ export async function confirmarRecepcionOperario(operarioId: string, asignacionI
       accion: "RECEPCION_CONFIRMADA_OPERARIO",
       cantidad: asignacion.cantidad,
       detalle: "Operario confirmó la recepción del artículo",
+      datos: asignacion.sub_skus.length ? { subSkus: asignacion.sub_skus } : undefined,
     });
     return { yaConfirmada: false, confirmadaAt: ahora };
   });
@@ -554,6 +609,7 @@ export async function solicitarDevolucionOperario(
       accion: "DEVOLUCION_SOLICITADA_OPERARIO",
       cantidad: asignacion.cantidad,
       detalle: motivo ? `Operario solicitó devolución: ${motivo}` : "Operario solicitó devolución",
+      datos: asignacion.sub_skus.length ? { subSkus: asignacion.sub_skus } : undefined,
     });
     return { yaSolicitada: false, solicitadaAt: ahora };
   });
@@ -605,6 +661,7 @@ export async function recibirDevolucionSupervisor(supervisorId: string, asignaci
       accion: "DEVOLUCION_RECIBIDA_SUPERVISOR",
       cantidad: asignacion.cantidad,
       detalle: "Supervisor confirmó la recepción de la devolución",
+      datos: asignacion.sub_skus.length ? { subSkus: asignacion.sub_skus } : undefined,
     });
     return { recibidaAt: ahora };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -659,9 +716,13 @@ export async function devolverInventarioABodega(input: {
         });
         if (updated.count !== 1) throw new InventarioBeckError("El stock cambió mientras devolvías. Intenta nuevamente.", 409);
       } else {
+        const { seleccionados: subSkusDevueltos, restantes: subSkusRestantes } = separarSubSkus(
+          lote.sub_skus,
+          cantidadMover,
+        );
         const updated = await tx.asignaciones_inventario_beck.updateMany({
           where: { id: lote.id, trabajador_id: null, estado: "asignado", cantidad: lote.cantidad },
-          data: { cantidad: { decrement: cantidadMover } },
+          data: { cantidad: { decrement: cantidadMover }, sub_skus: subSkusRestantes },
         });
         if (updated.count !== 1) throw new InventarioBeckError("El stock cambió mientras devolvías. Intenta nuevamente.", 409);
         const creada = await tx.asignaciones_inventario_beck.create({
@@ -679,6 +740,7 @@ export async function devolverInventarioABodega(input: {
             devuelto_at: ahora,
             devuelto_por_id: input.supervisorId,
             asignacion_origen_id: lote.id,
+            sub_skus: subSkusDevueltos,
           },
         });
         asignacionDevueltaId = creada.id;
@@ -692,6 +754,9 @@ export async function devolverInventarioABodega(input: {
         accion: "DEVUELTO_BODEGA",
         cantidad: cantidadMover,
         detalle: motivo ? `Supervisor devolvió a bodega: ${motivo}` : "Supervisor devolvió el artículo a bodega",
+        datos: lote.sub_skus.length
+          ? { subSkus: cantidadMover === lote.cantidad ? lote.sub_skus : lote.sub_skus.slice(0, cantidadMover) }
+          : undefined,
       });
       devueltas.push(asignacionDevueltaId);
       restante -= cantidadMover;
@@ -730,6 +795,7 @@ export async function listarTrazabilidadAsignacion(
       trabajador_id: true,
       asignacion_origen_id: true,
       created_at: true,
+      sub_skus: true,
       trazabilidad_inventario_beck: {
         where: rol === "terreno" ? { trabajador_id: usuarioId } : undefined,
         select: { id: true },
@@ -745,6 +811,15 @@ export async function listarTrazabilidadAsignacion(
   const tramosLinaje: Array<{ asignacion_id: string; created_at?: { lte: Date } }> = [
     { asignacion_id: asignacion.id },
   ];
+  if (asignacion.sub_skus.length > 0) {
+    const asignacionesMismaUnidad = await prisma.asignaciones_inventario_beck.findMany({
+      where: { sub_skus: { hasSome: asignacion.sub_skus } },
+      select: { id: true },
+    });
+    for (const relacionada of asignacionesMismaUnidad) {
+      if (relacionada.id !== asignacion.id) tramosLinaje.push({ asignacion_id: relacionada.id });
+    }
+  }
   let origenId = asignacion.asignacion_origen_id;
   let limite = asignacion.created_at;
   for (let nivel = 0; origenId && nivel < 20; nivel += 1) {
@@ -831,6 +906,7 @@ export async function listarHistorialInventarioOperario(operarioId: string) {
           epp_id: true,
           implemento_id: true,
           herramienta_id: true,
+          sub_skus: true,
           obras: { select: { id: true, nombre: true, codigo: true, estado: true } },
           ...ITEM_SELECT,
         },
@@ -854,8 +930,104 @@ export async function listarHistorialInventarioOperario(operarioId: string) {
 }
 
 export async function buscarInventarioPorCodigo(supervisorId: string, codigoRaw: unknown) {
-  const codigo = typeof codigoRaw === "string" ? codigoRaw.trim().slice(0, 100) : "";
+  const codigo = typeof codigoRaw === "string" ? codigoRaw.trim().slice(0, 120) : "";
   if (!codigo) throw new InventarioBeckError("El código de barras está vacío.");
+
+  const coincidencias = await prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+    SELECT id
+    FROM asignaciones_inventario_beck
+    WHERE EXISTS (
+      SELECT 1
+      FROM unnest(sub_skus) AS codigo_unitario
+      WHERE lower(codigo_unitario) = lower(${codigo})
+    )
+  `);
+
+  if (coincidencias.length > 0) {
+    const asignaciones = await prisma.asignaciones_inventario_beck.findMany({
+      where: { id: { in: coincidencias.map(({ id }) => id) } },
+      select: {
+        id: true,
+        estado: true,
+        cantidad: true,
+        sub_skus: true,
+        trabajador_id: true,
+        jefe_obra_id: true,
+        created_at: true,
+        reasignado_at: true,
+        devuelto_at: true,
+        epp_id: true,
+        implemento_id: true,
+        herramienta_id: true,
+        tipo_item: true,
+        obras: { select: { id: true, nombre: true, codigo: true, estado: true } },
+        usuarios_asignaciones_inventario_beck_jefe_obra_idTousuarios: {
+          select: { id: true, nombre: true },
+        },
+        usuarios_asignaciones_inventario_beck_trabajador_idTousuarios: {
+          select: { id: true, nombre: true },
+        },
+        ...ITEM_SELECT,
+      },
+      orderBy: [{ created_at: "desc" }],
+    });
+
+    const porArticulo = new Map<string, typeof asignaciones>();
+    for (const asignacion of asignaciones) {
+      const itemId = asignacion.epp_id ?? asignacion.implemento_id ?? asignacion.herramienta_id;
+      if (!itemId) continue;
+      const clave = `${asignacion.tipo_item}:${itemId}`;
+      porArticulo.set(clave, [...(porArticulo.get(clave) ?? []), asignacion]);
+    }
+
+    const resultados = Array.from(porArticulo.values()).map((historial) => {
+      const activas = historial.filter((asignacion) => asignacion.estado === "asignado");
+      if (activas.length > 1) {
+        throw new InventarioBeckError(
+          "El código unitario figura en más de una asignación activa. Debe ser revisado por bodega.",
+          409,
+        );
+      }
+      const asignacion = activas[0] ?? historial[0];
+      const item = serializarItem(asignacion);
+      const trabajador = asignacion.usuarios_asignaciones_inventario_beck_trabajador_idTousuarios;
+      const supervisor = asignacion.usuarios_asignaciones_inventario_beck_jefe_obra_idTousuarios;
+      const subSku = asignacion.sub_skus.find(
+        (valor) => valor.toLocaleLowerCase() === codigo.toLocaleLowerCase(),
+      ) ?? codigo;
+      const estaActiva = asignacion.estado === "asignado";
+      const disponibleConSupervisor = estaActiva && !trabajador;
+
+      return {
+        ...item,
+        subSku,
+        tipoConsulta: "unidad" as const,
+        estadoUnidad: !estaActiva
+          ? "en_bodega" as const
+          : trabajador
+            ? "asignado_operario" as const
+            : "disponible_supervisor" as const,
+        asignacionId: asignacion.id,
+        ultimaActualizacion: asignacion.devuelto_at ?? asignacion.reasignado_at ?? asignacion.created_at,
+        saldoBodega: null,
+        custodios: estaActiva ? [{
+          asignacionId: asignacion.id,
+          cantidad: 1,
+          obra: asignacion.obras,
+          custodio: trabajador
+            ? { id: trabajador.id, nombre: trabajador.nombre, rol: "operario" as const }
+            : { id: supervisor.id, nombre: supervisor.nombre, rol: "supervisor" as const },
+          supervisor: { id: supervisor.id, nombre: supervisor.nombre },
+          esMio: asignacion.jefe_obra_id === supervisorId,
+        }] : [],
+        disponibleSupervisorPorObra: disponibleConSupervisor && asignacion.jefe_obra_id === supervisorId
+          ? [{ obra: asignacion.obras, cantidad: 1 }]
+          : [],
+      };
+    });
+
+    return { codigo, tipoConsulta: "unidad" as const, resultados };
+  }
 
   const [epp, implementos, herramientas] = await Promise.all([
     prisma.inventario_beck_epp.findMany({
@@ -941,6 +1113,7 @@ export async function buscarInventarioPorCodigo(supervisorId: string, codigoRaw:
     return {
       itemId: item.id,
       tipoItem,
+      tipoConsulta: "sku" as const,
       sku: item.sku,
       nombre,
       detalle,
@@ -980,5 +1153,5 @@ export async function buscarInventarioPorCodigo(supervisorId: string, codigoRaw:
     )),
   ];
 
-  return { codigo, resultados };
+  return { codigo, tipoConsulta: "sku" as const, resultados };
 }
