@@ -230,12 +230,12 @@ export async function getIngenieriaResumen(req: Request, res: Response) {
       validadosMes,
       rechazadosMes,
     ] = await prisma.$transaction([
+      // Total por resolver, igual que el listado de Ingeniería en estado en_revision.
+      // Incluye revisiones iniciadas y correcciones reenviadas por el supervisor.
       prisma.registros_terreno.count({
         where: {
           carga_completa: true,
           estado: EstadoRegistroTerreno.en_revision,
-          es_correccion: false,
-          procesamiento_ingenieria: null,
         },
       }),
       prisma.registros_terreno.count({
