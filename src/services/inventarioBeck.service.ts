@@ -10,6 +10,8 @@ type LineaAsignacion = {
 };
 
 const TIPOS_VALIDOS = new Set<string>(Object.values(TipoInventarioBeck));
+// Una devolución operario→supervisor recibida puede reasignarse; una pendiente de bodega no.
+export const LOTE_DISPONIBLE = { OR: [{ devolucion_solicitada_at: null }, { devolucion_recibida_at: { not: null } }] } satisfies Prisma.asignaciones_inventario_beckWhereInput;
 
 export class InventarioBeckError extends Error {
   constructor(message: string, public readonly status = 400) {
@@ -204,6 +206,7 @@ export async function listarDisponibleSupervisor(supervisorId: string, obraId: s
       obra_id: obraId,
       estado: "asignado",
       trabajador_id: null,
+      ...LOTE_DISPONIBLE,
     },
     select: {
       id: true,
@@ -381,6 +384,7 @@ async function ejecutarAsignacion(
           obra_id: obraId,
           estado: "asignado",
           trabajador_id: null,
+          ...LOTE_DISPONIBLE,
           ...whereItem(linea),
         },
         orderBy: { created_at: "asc" },
@@ -674,6 +678,7 @@ export async function devolverInventarioABodega(input: {
   itemId: unknown;
   cantidad: unknown;
   motivo?: unknown;
+  requestId?: unknown;
 }) {
   const obraId = typeof input.obraId === "string" ? input.obraId.trim() : "";
   const itemId = typeof input.itemId === "string" ? input.itemId.trim() : "";
@@ -684,14 +689,26 @@ export async function devolverInventarioABodega(input: {
     : null;
   const [linea] = parseLineasInventario([{ tipoItem, itemId, cantidad }]);
   if (!obraId) throw new InventarioBeckError("Debes seleccionar una obra.");
+  const requestId = typeof input.requestId === "string" ? input.requestId : null;
+  if (requestId && !/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(requestId)) throw new InventarioBeckError("Identificador de devolución inválido.");
 
   return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(749182)::text`;
+    if (requestId) {
+      const prev = await tx.trazabilidad_inventario_beck.findMany({ where: { actor_id: input.supervisorId, accion: "DEVOLUCION_SOLICITADA_BODEGA", datos: { path: ["requestId"], equals: requestId } } });
+      if (prev.length) {
+        const datos = prev[0].datos as { obraId?: string; tipoItem?: string; itemId?: string; cantidad?: number; motivo?: string | null };
+        if (datos.obraId !== obraId || datos.tipoItem !== tipoItem || datos.itemId !== itemId || datos.cantidad !== cantidad || datos.motivo !== motivo) throw new InventarioBeckError("La solicitud ya se utilizó con otros datos.", 409);
+        return { ids: prev.map(e => e.asignacion_id), cantidad, pendienteRecepcionBodega: true };
+      }
+    }
     const lotes = await tx.asignaciones_inventario_beck.findMany({
       where: {
         jefe_obra_id: input.supervisorId,
         obra_id: obraId,
         estado: "asignado",
         trabajador_id: null,
+        ...LOTE_DISPONIBLE,
         ...whereItem(linea),
       },
       orderBy: { created_at: "asc" },
@@ -712,7 +729,7 @@ export async function devolverInventarioABodega(input: {
       if (cantidadMover === lote.cantidad) {
         const updated = await tx.asignaciones_inventario_beck.updateMany({
           where: { id: lote.id, trabajador_id: null, estado: "asignado", cantidad: lote.cantidad },
-          data: { estado: "devuelto", devuelto_at: ahora, devuelto_por_id: input.supervisorId },
+          data: { devolucion_solicitada_at: ahora, devolucion_solicitada_por_id: input.supervisorId, devolucion_motivo: motivo, devolucion_recibida_at: null, devolucion_recibida_por_id: null },
         });
         if (updated.count !== 1) throw new InventarioBeckError("El stock cambió mientras devolvías. Intenta nuevamente.", 409);
       } else {
@@ -736,9 +753,10 @@ export async function devolverInventarioABodega(input: {
             herramienta_id: lote.herramienta_id,
             cantidad: cantidadMover,
             observacion: motivo ?? lote.observacion,
-            estado: "devuelto",
-            devuelto_at: ahora,
-            devuelto_por_id: input.supervisorId,
+            estado: "asignado",
+            devolucion_solicitada_at: ahora,
+            devolucion_solicitada_por_id: input.supervisorId,
+            devolucion_motivo: motivo,
             asignacion_origen_id: lote.id,
             sub_skus: subSkusDevueltos,
           },
@@ -751,34 +769,16 @@ export async function devolverInventarioABodega(input: {
         obraId,
         actorId: input.supervisorId,
         jefeObraId: input.supervisorId,
-        accion: "DEVUELTO_BODEGA",
+        accion: "DEVOLUCION_SOLICITADA_BODEGA",
         cantidad: cantidadMover,
-        detalle: motivo ? `Supervisor devolvió a bodega: ${motivo}` : "Supervisor devolvió el artículo a bodega",
-        datos: lote.sub_skus.length
-          ? { subSkus: cantidadMover === lote.cantidad ? lote.sub_skus : lote.sub_skus.slice(0, cantidadMover) }
-          : undefined,
+        detalle: motivo ? `Supervisor solicitó devolución a bodega: ${motivo}` : "Pendiente de recepción física por bodega",
+        datos: { subSkus: cantidadMover === lote.cantidad ? lote.sub_skus : lote.sub_skus.slice(0, cantidadMover), requestId, obraId, tipoItem, itemId, cantidad, motivo },
       });
       devueltas.push(asignacionDevueltaId);
       restante -= cantidadMover;
     }
 
-    if (linea.tipoItem === TipoInventarioBeck.epp) {
-      const item = await tx.inventario_beck_epp.findUniqueOrThrow({ where: { id: linea.itemId }, select: { salida: true } });
-      await tx.inventario_beck_epp.update({
-        where: { id: linea.itemId },
-        data: { saldo: { increment: linea.cantidad }, salida: Math.max(0, item.salida - linea.cantidad) },
-      });
-    } else if (linea.tipoItem === TipoInventarioBeck.implemento) {
-      const item = await tx.inventario_beck_implementos.findUniqueOrThrow({ where: { id: linea.itemId }, select: { salida: true } });
-      await tx.inventario_beck_implementos.update({
-        where: { id: linea.itemId },
-        data: { saldo: { increment: linea.cantidad }, salida: Math.max(0, item.salida - linea.cantidad) },
-      });
-    } else {
-      await tx.inventario_beck_herramientas.update({ where: { id: linea.itemId }, data: { encargado: null } });
-    }
-
-    return { ids: devueltas, cantidad: linea.cantidad };
+    return { ids: devueltas, cantidad: linea.cantidad, pendienteRecepcionBodega: true };
   }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 }
 
@@ -953,6 +953,8 @@ export async function buscarInventarioPorCodigo(supervisorId: string, codigoRaw:
         sub_skus: true,
         trabajador_id: true,
         jefe_obra_id: true,
+        devolucion_solicitada_at: true,
+        devolucion_recibida_at: true,
         created_at: true,
         reasignado_at: true,
         devuelto_at: true,
@@ -996,14 +998,18 @@ export async function buscarInventarioPorCodigo(supervisorId: string, codigoRaw:
         (valor) => valor.toLocaleLowerCase() === codigo.toLocaleLowerCase(),
       ) ?? codigo;
       const estaActiva = asignacion.estado === "asignado";
-      const disponibleConSupervisor = estaActiva && !trabajador;
+      const pendienteBodega = estaActiva && !trabajador && !!asignacion.devolucion_solicitada_at && !asignacion.devolucion_recibida_at;
+      const disponibleConSupervisor = estaActiva && !trabajador && !pendienteBodega;
 
       return {
         ...item,
         subSku,
+        pendienteBodega,
         tipoConsulta: "unidad" as const,
         estadoUnidad: !estaActiva
           ? "en_bodega" as const
+          : pendienteBodega
+            ? "pendiente_bodega" as const
           : trabajador
             ? "asignado_operario" as const
             : "disponible_supervisor" as const,
@@ -1012,6 +1018,7 @@ export async function buscarInventarioPorCodigo(supervisorId: string, codigoRaw:
         saldoBodega: null,
         custodios: estaActiva ? [{
           asignacionId: asignacion.id,
+          pendienteBodega,
           cantidad: 1,
           obra: asignacion.obras,
           custodio: trabajador
@@ -1038,7 +1045,7 @@ export async function buscarInventarioPorCodigo(supervisorId: string, codigoRaw:
         asignaciones_inventario_beck: {
           where: { estado: "asignado" },
           select: {
-            id: true, cantidad: true, jefe_obra_id: true, trabajador_id: true,
+            id: true, cantidad: true, jefe_obra_id: true, trabajador_id: true, devolucion_solicitada_at: true, devolucion_recibida_at: true,
             obras: { select: { id: true, nombre: true, codigo: true, estado: true } },
             usuarios_asignaciones_inventario_beck_jefe_obra_idTousuarios: { select: { id: true, nombre: true } },
             usuarios_asignaciones_inventario_beck_trabajador_idTousuarios: { select: { id: true, nombre: true } },
@@ -1054,7 +1061,7 @@ export async function buscarInventarioPorCodigo(supervisorId: string, codigoRaw:
         asignaciones_inventario_beck: {
           where: { estado: "asignado" },
           select: {
-            id: true, cantidad: true, jefe_obra_id: true, trabajador_id: true,
+            id: true, cantidad: true, jefe_obra_id: true, trabajador_id: true, devolucion_solicitada_at: true, devolucion_recibida_at: true,
             obras: { select: { id: true, nombre: true, codigo: true, estado: true } },
             usuarios_asignaciones_inventario_beck_jefe_obra_idTousuarios: { select: { id: true, nombre: true } },
             usuarios_asignaciones_inventario_beck_trabajador_idTousuarios: { select: { id: true, nombre: true } },
@@ -1069,7 +1076,7 @@ export async function buscarInventarioPorCodigo(supervisorId: string, codigoRaw:
         asignaciones_inventario_beck: {
           where: { estado: "asignado" },
           select: {
-            id: true, cantidad: true, jefe_obra_id: true, trabajador_id: true,
+            id: true, cantidad: true, jefe_obra_id: true, trabajador_id: true, devolucion_solicitada_at: true, devolucion_recibida_at: true,
             obras: { select: { id: true, nombre: true, codigo: true, estado: true } },
             usuarios_asignaciones_inventario_beck_jefe_obra_idTousuarios: { select: { id: true, nombre: true } },
             usuarios_asignaciones_inventario_beck_trabajador_idTousuarios: { select: { id: true, nombre: true } },
@@ -1089,7 +1096,8 @@ export async function buscarInventarioPorCodigo(supervisorId: string, codigoRaw:
   ) => {
     const disponiblesPorObra = new Map<string, { obra: any; cantidad: number }>();
     const custodios = item.asignaciones_inventario_beck.map((asignacion: any) => {
-      if (asignacion.jefe_obra_id === supervisorId && !asignacion.trabajador_id) {
+      const pendienteBodega = !asignacion.trabajador_id && !!asignacion.devolucion_solicitada_at && !asignacion.devolucion_recibida_at;
+      if (asignacion.jefe_obra_id === supervisorId && !asignacion.trabajador_id && !pendienteBodega) {
         const actual = disponiblesPorObra.get(asignacion.obras.id);
         disponiblesPorObra.set(asignacion.obras.id, {
           obra: asignacion.obras,
@@ -1101,6 +1109,7 @@ export async function buscarInventarioPorCodigo(supervisorId: string, codigoRaw:
       return {
         asignacionId: asignacion.id,
         cantidad: asignacion.cantidad,
+        pendienteBodega,
         obra: asignacion.obras,
         custodio: trabajador
           ? { id: trabajador.id, nombre: trabajador.nombre, rol: "operario" }

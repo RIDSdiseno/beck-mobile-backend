@@ -14,6 +14,7 @@ import registrosRoutes from "./routes/registros.routes";
 import firematRoutes from "./routes/firemat.routes";
 import adminRoutes from "./routes/admin.routes";
 import inventarioBeckRoutes from "./routes/inventarioBeck.routes";
+import bodegaBeckRoutes from "./routes/bodegaBeck.routes";
 import { captureAdminActivity } from "./middlewares/actividadAdmin.middleware";
 
 
@@ -79,6 +80,7 @@ app.use("/api/registros", registrosRoutes);
 app.use("/api/firemat", firematRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/inventario-beck", inventarioBeckRoutes);
+app.use("/api/bodega-beck", bodegaBeckRoutes);
 
 app.use((_req, res) => {
   res.status(404).json({

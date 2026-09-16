@@ -140,6 +140,7 @@ export async function postDevolverABodega(req: Request, res: Response) {
       itemId: req.body?.itemId,
       cantidad: req.body?.cantidad,
       motivo: req.body?.motivo,
+      requestId: req.body?.requestId,
     });
     return res.json({ success: true, data });
   } catch (error) {
