@@ -2,8 +2,11 @@
 
 ## Estado de entrega
 
-Código preparado en beck-app, beck-mobile-backend, beck-crm y back_beck_crm.
-La migración NO se ha aplicado al PostgreSQL compartido. No ejecutar prisma db push.
+Código publicado en main de beck-app, beck-mobile-backend, beck-crm y back_beck_crm.
+La migración se aplicó al PostgreSQL compartido el 25-09-2026 a las 16:56 UTC, después del despliegue de ambos backend.
+Se guardó un respaldo preventivo del inventario fuera de los repositorios y se verificó que las 22 asignaciones, 125 EPP, 49 implementos, 172 herramientas y 107 eventos conservaran exactamente su contenido.
+Las tablas de consumos y políticas comenzaron vacías; no se cambió la clasificación de ningún artículo existente.
+No ejecutar prisma db push.
 Los dos backend incluyen el mismo SQL; se aplica UNA vez por base, no una vez por repositorio.
 
 ## Reglas del flujo
@@ -20,7 +23,7 @@ Los dos backend incluyen el mismo SQL; se aplica UNA vez por base, no una vez po
 - Trazabilidad registra aviso, cantidad/códigos, observación, decisión, actor y fecha. El historial de consumos muestra quién lo solicitó y quién lo resolvió.
 - Los avisos son dentro de la aplicación (no notificaciones push). Supervisor ve pendientes en Consumos informados; bodega los consulta en app o pestaña Consumos del CRM.
 
-## Despliegue futuro (requiere autorización)
+## Procedimiento de despliegue para otros entornos
 
 1. Respaldar la base compartida y verificar el entorno objetivo. Preparar los cuatro artefactos de esta entrega.
 2. Desplegar ambos backend con sus clientes Prisma regenerados. Son compatibles con la base anterior: reportan consumos deshabilitados hasta existir ambas tablas.
