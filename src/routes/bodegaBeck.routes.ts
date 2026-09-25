@@ -7,6 +7,7 @@ import {
 import { Prisma } from "@prisma/client";
 import { verifyAppToken } from "../middlewares/auth.middleware";
 import * as bodega from "../services/bodegaBeck.service";
+import { listarConsumos, politicaConsumo, ConsumoError } from "../services/consumosInventario.service";
 import {
   buscarInventarioPorCodigo,
   InventarioBeckError,
@@ -39,7 +40,7 @@ const action =
     try {
       return res.json({ success: true, data: await fn(req) });
     } catch (e) {
-      if (e instanceof InventarioBeckError)
+      if (e instanceof InventarioBeckError || e instanceof ConsumoError)
         return res.status(e.status).json({ success: false, error: e.message });
       if (
         e instanceof Prisma.PrismaClientKnownRequestError &&
@@ -64,6 +65,9 @@ const action =
         });
     }
   };
+router.get("/consumos", action(req => listarConsumos("bodega", req.user!.id, req.query)));
+router.get("/articulos/:tipo/:id/consumo", action(req => politicaConsumo(req.params.tipo, req.params.id)));
+router.put("/articulos/:tipo/:id/consumo", action(req => politicaConsumo(req.params.tipo, req.params.id, req.user!.id, req.body?.consumible)));
 router.get(
   "/acceso",
   action(async () => ({ autorizado: true })),

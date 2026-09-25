@@ -105,11 +105,14 @@ function pdfFieldRow(
 
 // ── Generación de contenido PDF ──────────────────────────────────────────────────
 
+type PresentacionClientePdf = { accesibilidadTexto: string | null };
+
 function buildPdfContent(
   doc: PDFKit.PDFDocument,
   registro: any,
   validImages: Buffer[],
   visibleCampos?: Set<string>,
+  presentacionCliente?: PresentacionClientePdf,
 ): void {
   const visible = (campo: string) => !visibleCampos || visibleCampos.has(campo);
   const esJunta        = registro.tipo_registro === "junta_lineal_espuma";
@@ -217,7 +220,9 @@ function buildPdfContent(
   if (visible("factor_por_holguras")) {
     pdfFieldRow(doc, "Factor por holguras:", registro.factor_por_holguras?.toString());
   }
-  if (visible("accesibilidad")) pdfFieldRow(doc, "Accesibilidad:", registro.accesibilidad);
+  if (visible("accesibilidad")) {
+    pdfFieldRow(doc, "Accesibilidad:", presentacionCliente ? presentacionCliente.accesibilidadTexto : registro.accesibilidad);
+  }
   if (visible("cantidad_sellos_con_factores")) {
     pdfFieldRow(doc, "Sellos con factores:", registro.cantidad_sellos_con_factores?.toString());
   }
@@ -292,6 +297,7 @@ export async function generateRegistroPdfBuffer(
   registro: any,
   signatureOptions?: SignatureOptions,
   visibleCampos?: Set<string>,
+  presentacionCliente?: PresentacionClientePdf,
 ): Promise<Buffer> {
   const fotoUrls: string[] = visibleCampos && !visibleCampos.has("foto")
     ? []
@@ -330,7 +336,7 @@ export async function generateRegistroPdfBuffer(
     doc.on("end",  () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    buildPdfContent(doc, registro, validImages, visibleCampos);
+    buildPdfContent(doc, registro, validImages, visibleCampos, presentacionCliente);
 
     // ── Sección de firma cliente (si aplica) ─────────────────────────────────────
     if (signatureOptions?.pathData) {

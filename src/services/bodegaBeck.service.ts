@@ -157,7 +157,7 @@ export async function listarBodega(
   const rows = await prisma.$queryRaw<
     Record<string, unknown>[]
   >(Prisma.sql`SELECT i.*, i.${columnaNombre(tipo)} AS nombre,
-    ${tipo === "herramienta" ? Prisma.sql`CASE WHEN EXISTS(SELECT 1 FROM asignaciones_inventario_beck a WHERE a.herramienta_id=i.id AND a.estado='asignado') THEN 0 ELSE 1 END` : Prisma.sql`i.saldo`} AS disponible
+    ${tipo === "herramienta" ? Prisma.sql`CASE WHEN EXISTS(SELECT 1 FROM asignaciones_inventario_beck a WHERE a.herramienta_id=i.id AND a.estado::text IN ('asignado','consumido')) THEN 0 ELSE 1 END` : Prisma.sql`i.saldo`} AS disponible
     FROM ${tabla(tipo)} i WHERE (i.${columnaNombre(tipo)} ILIKE ${search} OR i.sku ILIKE ${search}) ${estado}
     ORDER BY i.${columnaNombre(tipo)}, i.id LIMIT 51 OFFSET ${(page - 1) * 50}`);
   return { items: rows.slice(0, 50), hasMore: rows.length > 50, page };
@@ -407,7 +407,7 @@ export async function asignarDesdeBodega(
         let subSkus: string[];
         if (tipo === "herramienta") {
           const actual = await tx.asignaciones_inventario_beck.findFirst({
-            where: { herramienta_id: item.id, estado: "asignado" },
+            where: { herramienta_id: item.id, estado: { not: "devuelto" } },
           });
           if (actual)
             throw new InventarioBeckError(
@@ -429,7 +429,7 @@ export async function asignarDesdeBodega(
             { codigo: string }[]
           >(Prisma.sql`SELECT DISTINCT unnest(a.sub_skus) AS codigo FROM asignaciones_inventario_beck a
           WHERE a.${campoItem(tipo)}=${item.id}::uuid AND a.estado='devuelto'
-          EXCEPT SELECT unnest(a.sub_skus) FROM asignaciones_inventario_beck a WHERE a.${campoItem(tipo)}=${item.id}::uuid AND a.estado='asignado'`);
+          EXCEPT SELECT unnest(a.sub_skus) FROM asignaciones_inventario_beck a WHERE a.${campoItem(tipo)}=${item.id}::uuid AND a.estado::text IN ('asignado','consumido')`);
           const reutilizados = anteriores
             .map((r) => r.codigo)
             .sort()
@@ -685,7 +685,7 @@ export async function resumenBodega() {
     prisma.inventario_beck_herramientas.count({
       where: {
         activo: true,
-        asignaciones_inventario_beck: { none: { estado: "asignado" } },
+        asignaciones_inventario_beck: { none: { estado: { not: "devuelto" } } },
       },
     }),
     prisma.asignaciones_inventario_beck.count({

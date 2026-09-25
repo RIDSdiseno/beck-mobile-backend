@@ -9,9 +9,13 @@ import {
 import { findRegistroWithDetails } from "./ingenieria.controller";
 import { generateRegistroPdfBuffer } from "./registroPdf.controller";
 import { obtenerConfiguracionRegistro } from "../services/configuracionCamposRegistro.service";
-import { getFactoresAislacionObra } from "../services/calculosRegistroTerreno.service";
+import { getFactoresAccesibilidadObra, getFactoresAislacionObra } from "../services/calculosRegistroTerreno.service";
+import { describirAccesibilidad } from "../utils/accesibilidadPresentacion";
+import { obtenerSellosClientePorObra } from "../services/clienteIndicadores.service";
+import { filtroBusquedaHistorialCliente } from "../utils/clienteHistorialBusqueda";
 import {
   type FactorAislacionEstado,
+  type FactorAccesibilidadNivel,
   resolveEstadoAislacionDesdeFactor,
 } from "../utils/calculosRegistroTerreno";
 
@@ -106,6 +110,7 @@ function normalizeFotos(registro: {
 function normalizeRegistroCliente(
   registro: any,
   factoresAislacion?: FactorAislacionEstado[],
+  factoresAccesibilidad?: FactorAccesibilidadNivel[],
 ) {
   const ejeParts = [registro.eje_alfabetico, registro.eje_numerico]
     .filter(Boolean)
@@ -137,6 +142,7 @@ function normalizeRegistroCliente(
     holgura:                   registro.holgura              ? Number(registro.holgura)               : null,
     factorPorHolguras:         registro.factor_por_holguras  ? Number(registro.factor_por_holguras)   : null,
     accesibilidad:             registro.accesibilidad,
+    accesibilidadTexto:        factoresAccesibilidad ? describirAccesibilidad(registro.accesibilidad, factoresAccesibilidad) : null,
     cantidadSellosConFactores: registro.cantidad_sellos_con_factores ? Number(registro.cantidad_sellos_con_factores) : null,
     aislacion:                 registro.aislacion             ? Number(registro.aislacion)             : null,
     aislacionAplica:           resolveEstadoAislacionDesdeFactor(
@@ -171,12 +177,14 @@ async function normalizeRegistrosCliente(registros: any[]) {
   const obraIds = [...new Set(registros.map((registro) => registro.obra_id).filter(Boolean))];
   const factoresPorObra = new Map(
     await Promise.all(
-      obraIds.map(async (obraId) => [obraId, await getFactoresAislacionObra(obraId)] as const),
+      obraIds.map(async (obraId) => [obraId, await Promise.all([
+        getFactoresAislacionObra(obraId), getFactoresAccesibilidadObra(obraId),
+      ])] as const),
     ),
   );
 
   return registros.map((registro) =>
-    normalizeRegistroCliente(registro, factoresPorObra.get(registro.obra_id)),
+    normalizeRegistroCliente(registro, factoresPorObra.get(registro.obra_id)?.[0], factoresPorObra.get(registro.obra_id)?.[1]),
   );
 }
 
@@ -215,6 +223,7 @@ export async function getClienteObras(req: Request, res: Response) {
       orderBy: { nombre: "asc" },
     });
 
+    const sellosPorObra = await obtenerSellosClientePorObra(obraIds);
     return res.json({
       success: true,
       data: obras.map((obra) => ({
@@ -226,6 +235,7 @@ export async function getClienteObras(req: Request, res: Response) {
         estado:               obra.estado,
         registrosPendientes:  obra._count.registros_terreno,
         registrosValidados:   obra.registros_terreno.length,
+        cantidadSellos:       sellosPorObra.get(obra.id) ?? 0,
       })),
     });
   } catch (error) {
@@ -347,17 +357,7 @@ export async function getClienteHistorial(req: Request, res: Response) {
       ...(fecha && /^\d{4}-\d{2}-\d{2}$/.test(fecha)
         ? { fecha: new Date(`${fecha}T00:00:00.000Z`) }
         : {}),
-      ...(search
-        ? {
-            OR: [
-              { numero_sello: { contains: search, mode: "insensitive" as const } },
-              { piso: { contains: search, mode: "insensitive" as const } },
-              { nombre_sellador: { contains: search, mode: "insensitive" as const } },
-              { obras: { nombre: { contains: search, mode: "insensitive" as const } } },
-              { obras: { codigo: { contains: search, mode: "insensitive" as const } } },
-            ],
-          }
-        : {}),
+      ...filtroBusquedaHistorialCliente(search),
     };
 
     if (!paginated) {
@@ -374,6 +374,8 @@ export async function getClienteHistorial(req: Request, res: Response) {
         where,
         select: {
           id: true, fecha: true, tipo_registro: true, estado: true, piso: true,
+          recinto: true, eje_numerico: true, eje_alfabetico: true,
+          descripcion_material: true, cantidad_sellos: true, metros_lineales: true,
           numero_sello: true, nombre_sellador: true, created_at: true, updated_at: true,
           obra_id: true, validado_cliente: true, validado_cliente_at: true,
           pdf_firmado_url: true,
@@ -419,10 +421,9 @@ export async function getClienteRegistroDetalle(req: Request, res: Response) {
       select: { ...REGISTRO_SELECT, obras: { select: { nombre: true, codigo: true } } },
     });
     if (!registro) return res.status(404).json({ success: false, error: "Registro no encontrado" });
-    const factoresAislacion = await getFactoresAislacionObra(registro.obra_id);
     return res.json({
       success: true,
-      data: normalizeRegistroCliente(registro, factoresAislacion),
+      data: (await normalizeRegistrosCliente([registro]))[0],
     });
   } catch (error) {
     console.error("GET CLIENTE REGISTRO DETALLE ERROR:", error);
@@ -511,13 +512,16 @@ export async function validarRegistroCliente(req: Request, res: Response) {
         .filter((campo) => campo.visible)
         .map((campo) => campo.campo),
     );
+    const accesibilidadTexto = camposVisiblesCliente.has("accesibilidad")
+      ? describirAccesibilidad(registroFull.accesibilidad, await getFactoresAccesibilidadObra(registroBase.obra_id))
+      : null;
     const pdfBuffer = await generateRegistroPdfBuffer(registroFull, {
       pathData,
       canvasWidth:  safeCanvasWidth,
       canvasHeight: safeCanvasHeight,
       firmadoPor,
       firmadoAt,
-    }, camposVisiblesCliente);
+    }, camposVisiblesCliente, { accesibilidadTexto });
 
     const codigoBeck = registroBase.codigo_beck ?? `REG-${id.slice(0, 6).toUpperCase()}`;
     const safeCodigoBeck = codigoBeck.replace(/[^a-zA-Z0-9_-]/g, "_");
@@ -538,6 +542,7 @@ export async function validarRegistroCliente(req: Request, res: Response) {
         validado_cliente:        true,
         validado_cliente_at:     firmadoAt,
         validado_cliente_por_id: session.userId,
+        nombre_firmante_cliente: firmadoPor,
         // Se conserva la columna por compatibilidad, pero ahora almacena el
         // public_id privado y nunca una URL pública.
         pdf_firmado_url:         pdfResult.public_id,
@@ -561,10 +566,9 @@ export async function validarRegistroCliente(req: Request, res: Response) {
       },
     });
 
-    const factoresAislacion = await getFactoresAislacionObra(updated.obra_id);
     return res.json({
       success: true,
-      data: normalizeRegistroCliente(updated, factoresAislacion),
+      data: (await normalizeRegistrosCliente([updated]))[0],
     });
   } catch (error) {
     console.error("VALIDAR REGISTRO CLIENTE ERROR:", error);

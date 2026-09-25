@@ -1240,6 +1240,7 @@ model auditoria_registros_holgura_20260813 {
 }
 
 model asignaciones_inventario_beck {
+  consumos consumos_inventario_beck[]
   id                                                                           String                         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
   obra_id                                                                      String                         @db.Uuid
   jefe_obra_id                                                                 String                         @db.Uuid
@@ -1498,7 +1499,39 @@ enum MonedaItemizado {
 enum EstadoAsignacionInventario {
   asignado
   devuelto
+  consumido
 }
+
+model politicas_consumo_inventario_beck {
+  tipo_item TipoInventarioBeck
+  item_id String @db.Uuid
+  consumible Boolean @default(false)
+  actualizado_por_id String @db.Uuid
+  updated_at DateTime @default(now()) @db.Timestamp(6)
+  @@id([tipo_item, item_id])
+}
+
+model consumos_inventario_beck {
+  id String @id @db.Uuid
+  asignacion_id String @db.Uuid
+  trabajador_id String @db.Uuid
+  jefe_obra_id String @db.Uuid
+  obra_id String @db.Uuid
+  cantidad Int
+  sub_skus String[] @default([])
+  observacion String?
+  estado String @default("pendiente") @db.VarChar(20)
+  solicitado_at DateTime @default(now()) @db.Timestamp(6)
+  resuelto_at DateTime? @db.Timestamp(6)
+  resuelto_por_id String? @db.Uuid
+  motivo_rechazo String?
+  asignacion_consumida_id String? @db.Uuid
+  asignacion asignaciones_inventario_beck @relation(fields: [asignacion_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  @@index([jefe_obra_id, estado, solicitado_at(sort: Desc)], map: "consumo_supervisor_estado_fecha")
+  @@index([trabajador_id, solicitado_at(sort: Desc)], map: "consumo_operario_fecha")
+  @@index([obra_id, solicitado_at(sort: Desc)], map: "consumo_obra_fecha")
+}
+
 
 enum TipoInventarioBeck {
   epp

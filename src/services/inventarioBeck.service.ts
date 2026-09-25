@@ -1,6 +1,7 @@
 import { Prisma, TipoInventarioBeck } from "@prisma/client";
 
 import { prisma } from "../config/prisma";
+import { enriquecerConsumos, bloquearConsumoPendiente } from "./consumosInventario.service";
 
 type LineaAsignacion = {
   tipoItem: TipoInventarioBeck;
@@ -266,7 +267,7 @@ export async function listarEntregadosSupervisor(supervisorId: string, obraId: s
     orderBy: [{ reasignado_at: "desc" }, { created_at: "desc" }],
   });
 
-  return asignaciones.map((asignacion) => ({
+  return enriquecerConsumos(asignaciones.map((asignacion) => ({
     id: asignacion.id,
     ...serializarItem(asignacion),
     cantidad: asignacion.cantidad,
@@ -276,7 +277,7 @@ export async function listarEntregadosSupervisor(supervisorId: string, obraId: s
     devolucionSolicitadaAt: asignacion.devolucion_solicitada_at,
     devolucionMotivo: asignacion.devolucion_motivo,
     trabajador: asignacion.usuarios_asignaciones_inventario_beck_trabajador_idTousuarios,
-  }));
+  })));
 }
 
 export async function listarOperariosObra(supervisorId: string, obraId: string) {
@@ -324,7 +325,7 @@ export async function listarAsignacionesOperario(operarioId: string) {
     orderBy: [{ reasignado_at: "desc" }, { created_at: "desc" }],
   });
 
-  return asignaciones.map((asignacion) => ({
+  return enriquecerConsumos(asignaciones.map((asignacion) => ({
     id: asignacion.id,
     ...serializarItem(asignacion),
     cantidad: asignacion.cantidad,
@@ -335,7 +336,7 @@ export async function listarAsignacionesOperario(operarioId: string) {
     devolucionMotivo: asignacion.devolucion_motivo,
     obra: asignacion.obras,
     supervisor: asignacion.usuarios_asignaciones_inventario_beck_jefe_obra_idTousuarios,
-  }));
+  })));
 }
 
 function whereItem(linea: LineaAsignacion) {
@@ -579,6 +580,8 @@ export async function solicitarDevolucionOperario(
     : null;
 
   return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(749182)::text`;
+    await bloquearConsumoPendiente(tx, asignacionId);
     const asignacion = await tx.asignaciones_inventario_beck.findFirst({
       where: { id: asignacionId, trabajador_id: operarioId, estado: "asignado" },
     });
@@ -621,6 +624,8 @@ export async function solicitarDevolucionOperario(
 
 export async function recibirDevolucionSupervisor(supervisorId: string, asignacionId: string) {
   return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT pg_advisory_xact_lock(749182)::text`;
+    await bloquearConsumoPendiente(tx, asignacionId);
     const asignacion = await tx.asignaciones_inventario_beck.findFirst({
       where: { id: asignacionId, jefe_obra_id: supervisorId, estado: "asignado" },
       include: {
@@ -1006,7 +1011,9 @@ export async function buscarInventarioPorCodigo(supervisorId: string, codigoRaw:
         subSku,
         pendienteBodega,
         tipoConsulta: "unidad" as const,
-        estadoUnidad: !estaActiva
+        estadoUnidad: asignacion.estado === "consumido"
+          ? "consumido" as const
+          : !estaActiva
           ? "en_bodega" as const
           : pendienteBodega
             ? "pendiente_bodega" as const
@@ -1014,6 +1021,9 @@ export async function buscarInventarioPorCodigo(supervisorId: string, codigoRaw:
             ? "asignado_operario" as const
             : "disponible_supervisor" as const,
         asignacionId: asignacion.id,
+        consumidoPor: asignacion.estado === "consumido" && trabajador
+          ? { nombre: trabajador.nombre, supervisor: supervisor.nombre, obra: asignacion.obras.nombre }
+          : null,
         ultimaActualizacion: asignacion.devuelto_at ?? asignacion.reasignado_at ?? asignacion.created_at,
         saldoBodega: null,
         custodios: estaActiva ? [{

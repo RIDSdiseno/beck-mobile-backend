@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { listarConsumos, solicitarConsumo, resolverConsumo, ConsumoError } from "../services/consumosInventario.service";
 
 import {
   getDisponibleSupervisor,
@@ -21,6 +22,14 @@ import { checkRole, verifyAppToken } from "../middlewares/auth.middleware";
 const router = Router();
 
 router.use(verifyAppToken);
+const consumoAction = (fn: (req: import("express").Request) => Promise<unknown>) => async (req: import("express").Request, res: import("express").Response) => {
+  try { return res.json({ success: true, data: await fn(req) }); }
+  catch (e) { return res.status(e instanceof ConsumoError ? e.status : 500).json({ success: false, error: e instanceof ConsumoError ? e.message : "No se pudo procesar el consumo." }); }
+};
+router.get("/operario/consumos", checkRole("terreno"), consumoAction(req => listarConsumos("operario", req.user!.id, req.query)));
+router.get("/supervisor/consumos", checkRole("jefeobra"), consumoAction(req => listarConsumos("supervisor", req.user!.id, req.query)));
+router.post("/operario/asignaciones/:id/consumo", checkRole("terreno"), consumoAction(req => solicitarConsumo(req.user!.id, req.params.id, req.body ?? {})));
+router.post("/supervisor/consumos/:id/resolver", checkRole("jefeobra"), consumoAction(req => resolverConsumo(req.user!.id, req.params.id, req.body?.confirmar, req.body?.motivo)));
 router.get("/supervisor/obras", checkRole("jefeobra"), getObrasInventarioSupervisor);
 router.get("/supervisor/codigo/:codigo", checkRole("jefeobra"), getInventarioPorCodigo);
 router.get("/supervisor/disponible", checkRole("jefeobra"), getDisponibleSupervisor);

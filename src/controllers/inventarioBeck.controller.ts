@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { ConsumoError } from "../services/consumosInventario.service";
 
 import {
   asignarInventarioAOperario,
@@ -19,7 +20,7 @@ import {
 } from "../services/inventarioBeck.service";
 
 function responderError(res: Response, error: unknown, fallback: string) {
-  if (error instanceof InventarioBeckError) {
+  if (error instanceof InventarioBeckError || error instanceof ConsumoError) {
     return res.status(error.status).json({ success: false, error: error.message });
   }
   return res.status(500).json({ success: false, error: fallback });
