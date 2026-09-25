@@ -521,7 +521,12 @@ export async function validarRegistroCliente(req: Request, res: Response) {
       canvasHeight: safeCanvasHeight,
       firmadoPor,
       firmadoAt,
-    }, camposVisiblesCliente, { accesibilidadTexto });
+    }, camposVisiblesCliente, {
+      accesibilidadTexto,
+      aislacionAplica: camposVisiblesCliente.has("aislacion")
+        ? resolveEstadoAislacionDesdeFactor(registroFull.aislacion, await getFactoresAislacionObra(registroBase.obra_id))
+        : null,
+    });
 
     const codigoBeck = registroBase.codigo_beck ?? `REG-${id.slice(0, 6).toUpperCase()}`;
     const safeCodigoBeck = codigoBeck.replace(/[^a-zA-Z0-9_-]/g, "_");

@@ -15,6 +15,7 @@ import firematRoutes from "./routes/firemat.routes";
 import adminRoutes from "./routes/admin.routes";
 import inventarioBeckRoutes from "./routes/inventarioBeck.routes";
 import bodegaBeckRoutes from "./routes/bodegaBeck.routes";
+import inventarioAdminRoutes from "./routes/inventarioAdmin.routes";
 import { captureAdminActivity } from "./middlewares/actividadAdmin.middleware";
 
 
@@ -78,6 +79,7 @@ app.use("/api/jefeobra", jefeobraRoutes);
 app.use("/api/obras", obrasRoutes);
 app.use("/api/registros", registrosRoutes);
 app.use("/api/firemat", firematRoutes);
+app.use("/api/admin/inventario-beck", inventarioAdminRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/inventario-beck", inventarioBeckRoutes);
 app.use("/api/bodega-beck", bodegaBeckRoutes);

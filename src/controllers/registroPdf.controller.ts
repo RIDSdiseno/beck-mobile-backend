@@ -5,6 +5,8 @@ import PDFDocument from "pdfkit";
 import { findRegistroWithDetails } from "./ingenieria.controller";
 import { getPrivateDownloadUrl } from "../services/cloudinary.service";
 import { prisma } from "../config/prisma";
+import { renderRegistroClientePdf } from "../services/registroClientePdf.service";
+import type { PresentacionClientePdf } from "../utils/clientePdfPresentacion";
 
 async function canDownloadRegistroPdf(
   userId: string,
@@ -56,16 +58,15 @@ const formatDateTime = (fecha: Date | string): string =>
   }).format(typeof fecha === "string" ? new Date(fecha) : fecha);
 
 async function fetchImageBuffer(url: string): Promise<Buffer | null> {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), 8000);
   try {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 8000);
     const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(t);
     if (!res.ok) return null;
     return Buffer.from(await res.arrayBuffer());
   } catch {
     return null;
-  }
+  } finally { clearTimeout(t); }
 }
 
 function pdfHRule(doc: PDFKit.PDFDocument, color = "#e2e8f0"): void {
@@ -104,8 +105,6 @@ function pdfFieldRow(
 }
 
 // ── Generación de contenido PDF ──────────────────────────────────────────────────
-
-type PresentacionClientePdf = { accesibilidadTexto: string | null };
 
 function buildPdfContent(
   doc: PDFKit.PDFDocument,
@@ -313,9 +312,15 @@ export async function generateRegistroPdfBuffer(
               )
             : foto.url,
         )
-      : (Array.isArray(registro.fotos_urls) ? registro.fotos_urls : []);
+      : [...new Set([
+          ...(Array.isArray(registro.fotos_urls) ? registro.fotos_urls : []),
+          ...(registro.foto_url ? [registro.foto_url] : []),
+        ])];
 
-  const imageBuffers = await Promise.all(fotoUrls.map(fetchImageBuffer));
+  const imageBuffers = await Promise.all([...new Set(fotoUrls)].map(fetchImageBuffer));
+  if (signatureOptions?.pathData && imageBuffers.some(buffer => buffer === null)) {
+    throw new Error("No se pudieron cargar todas las fotografías del registro. Intenta firmar nuevamente.");
+  }
   const validImages  = imageBuffers.filter((b): b is Buffer => b !== null);
 
   // Cargar sello si la imagen existe en assets/
@@ -336,89 +341,10 @@ export async function generateRegistroPdfBuffer(
     doc.on("end",  () => resolve(Buffer.concat(chunks)));
     doc.on("error", reject);
 
-    buildPdfContent(doc, registro, validImages, visibleCampos, presentacionCliente);
-
-    // ── Sección de firma cliente (si aplica) ─────────────────────────────────────
     if (signatureOptions?.pathData) {
-      // Nueva página dedicada para la firma — evita que doc.y desbordado rompa el layout
-      doc.addPage();
-      doc.rect(0, 0, PDF_W, 5).fill(BECK_YELLOW);
-      doc.y = 18;
-
-      pdfSectionHeader(doc, "VALIDACIÓN DEL CLIENTE");
-
-      // Badge azul "VALIDADO POR CLIENTE"
-      const clienteBadgeY = doc.y;
-      doc.rect(PDF_MARGIN, clienteBadgeY, 138, 16).fill("#2563eb");
-      doc.font("Helvetica-Bold").fontSize(7.5).fillColor("#ffffff")
-        .text("VALIDADO POR CLIENTE", PDF_MARGIN + 6, clienteBadgeY + 5, { width: 126, lineBreak: false });
-      doc.y = clienteBadgeY + 24;
-
-      pdfFieldRow(doc, "Firmado por:", signatureOptions.firmadoPor || "-");
-      if (signatureOptions.firmadoAt) {
-        pdfFieldRow(doc, "Fecha de firma:", formatDateTime(signatureOptions.firmadoAt));
-      }
-
-      doc.y += 18;
-
-      // Layout: caja de firma (izquierda) + sello (derecha, si existe)
-      const sigBoxY   = doc.y;
-      const sigBoxH   = 180;
-      const stampColW = selloBuffer ? 160 : 0;
-      const colGap    = selloBuffer ? 12  : 0;
-      const sigBoxW   = PDF_CONTENT_W - stampColW - colGap;
-      const sigBoxX   = PDF_MARGIN;
-
-      // ── Caja de firma ─────────────────────────────────────────────────────────
-      doc.rect(sigBoxX, sigBoxY, sigBoxW, sigBoxH).fill("#f8fafc");
-      doc.rect(sigBoxX, sigBoxY, sigBoxW, sigBoxH)
-        .strokeColor("#cbd5e1").lineWidth(1).stroke();
-
-      doc.font("Helvetica").fontSize(8).fillColor("#94a3b8")
-        .text("Firma digital del cliente", sigBoxX + 8, sigBoxY + sigBoxH - 17, { lineBreak: false });
-
-      // Escalar y dibujar la firma dentro del box
-      const padding = 16;
-      const availW  = sigBoxW - padding * 2;
-      const availH  = sigBoxH - padding * 2 - 20;
-      const scaleX  = availW / (signatureOptions.canvasWidth  || 1);
-      const scaleY  = availH / (signatureOptions.canvasHeight || 1);
-      const scale   = Math.min(scaleX, scaleY);
-
-      const drawW   = (signatureOptions.canvasWidth  || 1) * scale;
-      const drawH   = (signatureOptions.canvasHeight || 1) * scale;
-      const offsetX = sigBoxX + padding + (availW - drawW) / 2;
-      const offsetY = sigBoxY + padding + (availH - drawH) / 2;
-
-      try {
-        doc.save()
-          .translate(offsetX, offsetY)
-          .scale(scale)
-          .path(signatureOptions.pathData)
-          .strokeColor(BECK_DARK)
-          .lineWidth(2.5 / scale)
-          .lineCap("round")
-          .lineJoin("round")
-          .stroke()
-          .restore();
-      } catch {
-        // Si el path falla la caja queda visible pero vacía
-      }
-
-      // ── Sello (columna derecha) ────────────────────────────────────────────────
-      if (selloBuffer) {
-        const stampSize = 150;
-        const stampColX = PDF_MARGIN + sigBoxW + colGap;
-        const stampImgX = stampColX + (stampColW - stampSize) / 2;
-        const stampImgY = sigBoxY + (sigBoxH - stampSize) / 2;
-        try {
-          doc.image(selloBuffer, stampImgX, stampImgY, { fit: [stampSize, stampSize] });
-        } catch {
-          // Imagen no procesable — continúa sin sello
-        }
-      }
-
-      doc.y = sigBoxY + sigBoxH + 12;
+      renderRegistroClientePdf(doc, registro, validImages, signatureOptions, selloBuffer, visibleCampos, presentacionCliente);
+    } else {
+      buildPdfContent(doc, registro, validImages, visibleCampos, presentacionCliente);
     }
 
     doc.end();

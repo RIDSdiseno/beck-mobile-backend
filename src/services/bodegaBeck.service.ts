@@ -628,7 +628,7 @@ export async function historialBodega(actorId: string, pagina: unknown) {
   return { items: items.slice(0, 50), hasMore: items.length > 50, page };
 }
 
-export async function trazabilidadBodega(id: unknown, pagina: unknown) {
+export async function trazabilidadBodega(id: unknown, pagina: unknown, obraId?: string) {
   const page = enteroBodega(pagina ?? 1, 1);
   const asignacion = await prisma.asignaciones_inventario_beck.findUnique({
     where: { id: uuidBodega(id) },
@@ -659,7 +659,7 @@ export async function trazabilidadBodega(id: unknown, pagina: unknown) {
     limite = origen.created_at;
   }
   const items = await prisma.trazabilidad_inventario_beck.findMany({
-    where: { OR: linaje },
+    where: { OR: linaje, ...(obraId ? { obra_id: obraId } : {}) },
     orderBy: [{ created_at: "desc" }, { id: "desc" }],
     take: 51,
     skip: (page - 1) * 50,
@@ -667,6 +667,8 @@ export async function trazabilidadBodega(id: unknown, pagina: unknown) {
       usuarios_trazabilidad_inventario_beck_actor_idTousuarios: {
         select: { nombre: true },
       },
+      usuarios_trazabilidad_inventario_beck_jefe_obra_idTousuarios: { select: { nombre: true } },
+      usuarios_trazabilidad_inventario_beck_trabajador_idTousuarios: { select: { nombre: true } },
     },
   });
   return { page, hasMore: items.length > 50, items: items.slice(0, 50) };
