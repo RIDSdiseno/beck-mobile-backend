@@ -34,6 +34,17 @@ export async function getItemizadoOpciones(req: Request, res: Response) {
       }
     }
 
+    // En una obra con itemizado antiguo, el operario busca por el código que conoce (el propio).
+    const idsPorCodigoDeObra =
+      obraId && search
+        ? (
+            await prisma.configuracion_itemizado_opcion_obra.findMany({
+              where: { obra_id: obraId, codigo_personalizado: { contains: search, mode: "insensitive" } },
+              select: { itemizado_opcion_id: true },
+            })
+          ).map((c) => c.itemizado_opcion_id)
+        : [];
+
     const opciones = await prisma.itemizado_opciones.findMany({
       where: {
         elemento_pasante: { not: null },
@@ -47,6 +58,7 @@ export async function getItemizadoOpciones(req: Request, res: Response) {
                 { elemento_pasante: { contains: search, mode: "insensitive" } },
                 { elemento_penetra: { contains: search, mode: "insensitive" } },
                 { materialidad: { contains: search, mode: "insensitive" } },
+                ...(idsPorCodigoDeObra.length > 0 ? [{ id: { in: idsPorCodigoDeObra } }] : []),
               ],
             }
           : {}),
@@ -79,18 +91,28 @@ export async function getItemizadoOpciones(req: Request, res: Response) {
 
     const configs = await prisma.configuracion_itemizado_opcion_obra.findMany({
       where: { obra_id: obraId, itemizado_opcion_id: { in: opciones.map((o) => o.id) } },
-      select: { itemizado_opcion_id: true, visible: true, nombre_personalizado: true },
+      select: { itemizado_opcion_id: true, visible: true, nombre_personalizado: true, codigo_personalizado: true },
     });
     const configMap = new Map(configs.map((c) => [c.itemizado_opcion_id, c]));
 
-    const conVisibilidadObra = opciones.map((op) => {
-      const config = configMap.get(op.id);
-      return {
-        ...op,
-        visible: config ? config.visible : op.visible,
-        nombre_personalizado: config?.nombre_personalizado ?? null,
-      };
-    });
+    const conVisibilidadObra = opciones
+      .map((op) => {
+        const config = configMap.get(op.id);
+        return {
+          ...op,
+          // La app toma codigo_beck para mostrarlo y guardarlo en el registro: en una obra con
+          // itemizado antiguo debe ser el código propio. El del catálogo queda como referencia.
+          codigo_beck: config?.codigo_personalizado?.trim() || op.codigo_beck,
+          codigo_beck_catalogo: op.codigo_beck,
+          visible: config ? config.visible : op.visible,
+          nombre_personalizado: config?.nombre_personalizado ?? null,
+        };
+      });
+    // Solo en obras con códigos propios se reordena por el código que ve la obra; las demás
+    // conservan el orden de la base, como hasta ahora.
+    if (configs.some((c) => c.codigo_personalizado?.trim())) {
+      conVisibilidadObra.sort((a, b) => (a.codigo_beck ?? "").localeCompare(b.codigo_beck ?? "", "es"));
+    }
 
     const filtradas =
       visibleParam === "false"

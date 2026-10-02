@@ -761,6 +761,7 @@ model configuracion_itemizado_opcion_obra {
   created_at                             DateTime           @default(now()) @db.Timestamp(6)
   updated_at                             DateTime           @db.Timestamp(6)
   nombre_personalizado                   String?            @db.VarChar(255)
+  codigo_personalizado                   String?            @db.VarChar(100)
   orden                                  Int?
   rendimiento_reparacion_esperado_diario Int?
   rendimiento_sellos_esperado_diario     Int?
