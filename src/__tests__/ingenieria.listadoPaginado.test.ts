@@ -74,6 +74,7 @@ describe("listado paginado de Ingeniería", () => {
         limit: "30",
         cursor,
         estado: "rechazado",
+        tipoRegistro: "tabiqueria",
         obraId: "obra-1",
         fecha: "2026-08-21",
         search: "00297",
@@ -87,6 +88,7 @@ describe("listado paginado de Ingeniería", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           estado: "rechazado",
+          tipo_registro: "tabiqueria",
           obra_id: "obra-1",
           fecha: new Date("2026-08-21T00:00:00.000Z"),
           AND: [
@@ -108,6 +110,9 @@ describe("listado paginado de Ingeniería", () => {
         skip: 1,
       }),
     );
+    for (const [query] of mockCountRegistros.mock.calls) {
+      expect(query.where.tipo_registro ?? query.where.AND?.[0]?.tipo_registro).toBe("tabiqueria");
+    }
     expect(response.json).toHaveBeenCalledWith({
       success: true,
       data: {

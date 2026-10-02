@@ -1,4 +1,6 @@
 import { Request, Response } from "express";
+import { getTiposRegistroPermitidos } from "../services/tiposRegistro.service";
+import { getTramosHolguraObra } from "../services/calculosRegistroTerreno.service";
 import { canAccessObra, getMisObrasByUser } from "../services/obras.service";
 import {
   normalizarRolConfiguracion,
@@ -79,8 +81,15 @@ export async function getConfiguracionRegistro(req: Request, res: Response) {
       rolConfiguracion,
     );
 
+    const tiposRegistroPermitidos = await getTiposRegistroPermitidos(obraId);
+    const tramosHolguraPorTipo = Object.fromEntries(await Promise.all(
+      ["sello_cortafuego", "junta_lineal_espuma", "tabiqueria"].map(async (tipo) =>
+        [tipo, await getTramosHolguraObra(obraId, tipo)] as const),
+    ));
     return res.json({
       success: true,
+      tiposRegistroPermitidos,
+      tramosHolguraPorTipo,
       data: configuracion.map((campo) => ({
         campo: campo.appCampo,
         campoOrigen: campo.campo,

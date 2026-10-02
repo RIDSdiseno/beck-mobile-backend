@@ -1,3 +1,4 @@
+import { leerFiltroTipoRegistro } from "../utils/filtroTipoRegistro";
 import { Request, Response } from "express";
 import { EstadoObra } from "@prisma/client";
 import { prisma } from "../config/prisma";
@@ -67,11 +68,14 @@ export async function getControlesPendientesCorreccion(req: Request, res: Respon
   try {
     if (!ensureJefeObra(req, res)) return;
 
+    const tipoFiltro = leerFiltroTipoRegistro(req.query.tipoRegistro, res);
+    if (tipoFiltro === false) return;
     const controles = await prisma.controles_inspeccion.findMany({
       where: {
         conformidad: "no_conforme",
         correccion_enviada_at: null,
         registros_terreno: {
+          ...(tipoFiltro ? { tipo_registro: tipoFiltro } : {}),
           obras: { estado: { in: [EstadoObra.activa, EstadoObra.pausada] } },
         },
       },

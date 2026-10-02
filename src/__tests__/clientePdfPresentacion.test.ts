@@ -39,8 +39,16 @@ test("oculta cada campo según la configuración del cliente de la obra, incluid
   ]);
   expect(camposClientePdf(registro, new Set()).tecnicos).toEqual([]);
 });
-test("junta lineal muestra longitud, no número ni cantidad de sellos", () => {
+test("junta lineal muestra metros y número identificador, no cantidad de sellos", () => {
   const fields = camposClientePdf({ ...registro, tipo_registro: "junta_lineal_espuma", metros_lineales: 12.5, numero_sello: "99" });
-  expect(fields.tecnicos).toContainEqual({ label: "Longitud (m)", value: "12.5", amplio: false });
-  expect(fields.tecnicos.some(f => f.label === "N° de sello")).toBe(false);
+  expect(fields.tecnicos).toContainEqual({ label: "Cantidad de ml (Sin Factor)", value: "12.5", amplio: false });
+  expect(fields.tecnicos.some(f => f.label === "N° de sello")).toBe(true);
+});
+test("los metros y factores de Juntas respetan las claves de visibilidad del CRM", () => {
+  const junta = { id: "junta-1", tipo_registro: "junta_lineal_espuma", metros_lineales: 2.5,
+    aislacion: 1.3, cantidad_sellos_aislacion: 1.3, reparacion_tabique: 0, cantidad_final: 5 };
+  expect(camposClientePdf(junta, new Set()).tecnicos).toEqual([]);
+  expect(camposClientePdf(junta, new Set(["cantidadSellos"])).tecnicos).toEqual([
+    { label: "Cantidad de ml (Sin Factor)", value: "2.5", amplio: false },
+  ]);
 });

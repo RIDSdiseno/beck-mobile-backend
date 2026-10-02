@@ -22,7 +22,7 @@ export function renderRegistroClientePdf(doc: PDFKit.PDFDocument, registro: any,
     doc.rect(0, 0, doc.page.width, 4).fill(yellow);
     font(true, 16).fillColor(dark).text("BECK Soluciones", margin, 24, { width, lineBreak: false });
     font(true, 9).text(folio, margin, 29, { width, align: "right", lineBreak: false });
-    const tipo = registro.tipo_registro === "junta_lineal_espuma" ? "Junta lineal espuma" : "Sello cortafuego";
+    const tipo = registro.tipo_registro === "junta_lineal_espuma" ? "Junta lineal espuma" : registro.tipo_registro === "tabiqueria" ? "Tabiquería" : "Sello cortafuego";
     font(false, 8).fillColor(muted).text(page === 1 ? `${tipo} · Firmado por cliente` : "REGISTRO FIRMADO · CONTINUACIÓN", margin, 45, { width, lineBreak: false });
     // Información contextual de la obra; los datos configurables van en la grilla.
     const obra = [registro.obras?.nombre, registro.obras?.codigo].filter(Boolean).join(" · ");

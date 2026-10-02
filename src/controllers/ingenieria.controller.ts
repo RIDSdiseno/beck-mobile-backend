@@ -1,3 +1,4 @@
+import { leerFiltroTipoRegistro } from "../utils/filtroTipoRegistro";
 import { Request, Response } from "express";
 import {
   EstadoConformidadInspeccion,
@@ -219,6 +220,9 @@ function ensureIngenieria(req: Request, res: Response) {
 export async function getIngenieriaResumen(req: Request, res: Response) {
   try {
     if (!ensureIngenieria(req, res)) return;
+    const tipoRegistro = leerFiltroTipoRegistro(req.query.tipoRegistro, res);
+    if (tipoRegistro === false) return;
+    const filtroTipo = tipoRegistro ? { tipo_registro: tipoRegistro } : {};
     const usuarioId = req.user!.id;
     const now = new Date();
     const inicioMes = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
@@ -234,12 +238,14 @@ export async function getIngenieriaResumen(req: Request, res: Response) {
       // Incluye revisiones iniciadas y correcciones reenviadas por el supervisor.
       prisma.registros_terreno.count({
         where: {
+          ...filtroTipo,
           carga_completa: true,
           estado: EstadoRegistroTerreno.en_revision,
         },
       }),
       prisma.registros_terreno.count({
         where: {
+          ...filtroTipo,
           carga_completa: true,
           estado: EstadoRegistroTerreno.en_revision,
           procesamiento_ingenieria: { is: { usuario_id: usuarioId } },
@@ -247,6 +253,7 @@ export async function getIngenieriaResumen(req: Request, res: Response) {
       }),
       prisma.registros_terreno.count({
         where: {
+          ...filtroTipo,
           carga_completa: true,
           estado: EstadoRegistroTerreno.en_revision,
           es_correccion: true,
@@ -261,6 +268,7 @@ export async function getIngenieriaResumen(req: Request, res: Response) {
       }),
       prisma.registros_terreno.count({
         where: {
+          ...filtroTipo,
           carga_completa: true,
           estado: EstadoRegistroTerreno.validado,
           procesamiento_ingenieria: {
@@ -270,6 +278,7 @@ export async function getIngenieriaResumen(req: Request, res: Response) {
       }),
       prisma.registros_terreno.count({
         where: {
+          ...filtroTipo,
           carga_completa: true,
           estado: EstadoRegistroTerreno.rechazado,
           rechazado_por_id: usuarioId,
@@ -303,6 +312,8 @@ export async function getIngenieriaRegistros(req: Request, res: Response) {
   try {
     if (!ensureIngenieria(req, res)) return;
 
+    const tipoRegistro = leerFiltroTipoRegistro(req.query.tipoRegistro, res);
+    if (tipoRegistro === false) return;
     const estado = normalizeText(req.query.estado);
     const search = normalizeText(req.query.search).toLowerCase();
     const obraId = normalizeText(req.query.obraId);
@@ -386,6 +397,7 @@ export async function getIngenieriaRegistros(req: Request, res: Response) {
         }
       : undefined;
     const baseWhere: Prisma.registros_terrenoWhereInput = {
+      ...(tipoRegistro ? { tipo_registro: tipoRegistro } : {}),
       carga_completa: true,
       estado: { in: ESTADOS_INGENIERIA },
       ...(obraId ? { obra_id: obraId } : {}),
@@ -690,6 +702,7 @@ export async function updateRegistroIngenieria(req: Request, res: Response) {
     const ejeAlfabeticoInput = ejeAlfabetico ?? eje_alfabetico;
     const numeroSelloInput = numeroSello ?? numero_sello;
     const cantidadSellosInput = cantidadSellos ?? cantidad_sellos;
+    const metrosInput = req.body?.metrosLineales ?? req.body?.metros_lineales;
     const nombreSelladorInput = nombreSellador ?? nombre_sellador;
     const reparacionTabiqueInput = reparacionTabique ?? reparacion_tabique;
     const itemizadoMandanteInput = itemizadoMandante ?? itemizado_mandante;
@@ -716,15 +729,22 @@ export async function updateRegistroIngenieria(req: Request, res: Response) {
     if (numeroSelloInput !== undefined) {
       data.numero_sello = normalizeText(numeroSelloInput) || currentRegistro.numero_sello;
     }
-    if (cantidadSellosInput !== undefined) {
+    if (cantidadSellosInput !== undefined && currentRegistro.tipo_registro !== "junta_lineal_espuma") {
       const parsed = Number(cantidadSellosInput);
-      if (!Number.isFinite(parsed)) {
+      if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
         return res.status(400).json({
           success: false,
           error: "Cantidad de sellos no válida",
         });
       }
       data.cantidad_sellos = Math.trunc(parsed);
+    }
+    if (metrosInput !== undefined && currentRegistro.tipo_registro === "junta_lineal_espuma") {
+      const parsed = Number(String(metrosInput).replace(",", "."));
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        return res.status(400).json({ success: false, error: "Cantidad de ml no válida" });
+      }
+      data.metros_lineales = parsed;
     }
     if (nombreSelladorInput !== undefined) {
       data.nombre_sellador =
@@ -786,8 +806,8 @@ export async function updateRegistroIngenieria(req: Request, res: Response) {
     const isJuntaLineal =
       currentRegistro.tipo_registro === "junta_lineal_espuma";
     const cantidadSellosFinal =
-      cantidadSellosInput !== undefined
-        ? Math.trunc(Number(cantidadSellosInput))
+      isJuntaLineal ? 0 : cantidadSellosInput !== undefined
+        ? Number(cantidadSellosInput)
         : currentRegistro.cantidad_sellos;
     const holguraFinal =
       holgura !== undefined
@@ -807,10 +827,9 @@ export async function updateRegistroIngenieria(req: Request, res: Response) {
       piso !== undefined
         ? normalizeText(piso) || currentRegistro.piso
         : currentRegistro.piso;
-    const calcResult = isJuntaLineal
-      ? null
-      : await calcularCamposConConfiguracion(currentRegistro.obra_id, {
+    const calcResult = await calcularCamposConConfiguracion(currentRegistro.obra_id, {
           cantidad_sellos: cantidadSellosFinal,
+          metros_lineales: metrosInput !== undefined ? Number(String(metrosInput).replace(",", ".")) : currentRegistro.metros_lineales,
           holgura: holguraFinal,
           accesibilidad: accesibilidadFinal ?? 1,
           aislacion: aislacionFinal,
@@ -1021,12 +1040,9 @@ export async function rechazarRegistroIngenieria(req: Request, res: Response) {
       });
     }
 
-    const isJuntaLineal =
-      currentRegistro.tipo_registro === "junta_lineal_espuma";
-    const calcResult = isJuntaLineal
-      ? null
-      : await calcularCamposConConfiguracion(currentRegistro.obra_id, {
+    const calcResult = await calcularCamposConConfiguracion(currentRegistro.obra_id, {
           cantidad_sellos: currentRegistro.cantidad_sellos,
+          metros_lineales: currentRegistro.metros_lineales,
           holgura: Number(currentRegistro.holgura),
           accesibilidad: currentRegistro.accesibilidad ?? 1,
           aislacion: currentRegistro.aislacion,

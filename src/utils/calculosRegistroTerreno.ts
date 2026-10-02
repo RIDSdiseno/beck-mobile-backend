@@ -15,6 +15,7 @@ export interface FactorAislacionEstado {
 
 export interface CalcRegistroInput {
   cantidad_sellos: number;
+  metros_lineales?: number | null;
   holgura: number;
   accesibilidad: unknown;
   aislacion: unknown;
@@ -232,17 +233,26 @@ export function calcularCamposRegistroTerreno(
   );
   const aplicaReparacion = resolveReparacionTabique(input.reparacion_tabique);
   const esSotano = input.piso === "-1";
+  const cantidad = input.tipoRegistro === "junta_lineal_espuma"
+    ? input.metros_lineales
+    : input.cantidad_sellos;
+  if (cantidad == null || !Number.isFinite(cantidad) || cantidad < 0) {
+    throw new Error("CANTIDAD DE REGISTRO INVÁLIDA");
+  }
 
   const cantidad_sellos_con_factores = esSotano
-    ? input.cantidad_sellos *
+    ? cantidad *
       factor_por_holguras *
       accesibilidadFactor *
       1.1
-    : input.cantidad_sellos *
+    : cantidad *
       factor_por_holguras *
       accesibilidadFactor;
   const cantidad_sellos_aislacion = aislacion_normalizada;
-  const base = cantidad_sellos_con_factores * aislacion_normalizada;
+  // En Juntas y Tabiquería la aislación se conserva como información,
+  // pero no interviene en la base. Sellos mantiene su fórmula histórica.
+  const aislacionInformativa = ["junta_lineal_espuma", "tabiqueria"].includes(input.tipoRegistro);
+  const base = cantidad_sellos_con_factores * (aislacionInformativa ? 1 : aislacion_normalizada);
   const cantidad_final = esSotano
     ? base
     : aplicaReparacion

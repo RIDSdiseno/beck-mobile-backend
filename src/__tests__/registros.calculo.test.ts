@@ -5,9 +5,11 @@ const mockCreateRegistro = jest.fn();
 const mockCanAccessObra = jest.fn();
 const mockCalcularCampos = jest.fn();
 const mockFindManyConfiguracion = jest.fn();
+const mockTipos = jest.fn();
 
 jest.mock("../config/prisma", () => ({
   prisma: {
+    obra_tipos_registro: { findMany: (...args: unknown[]) => mockTipos(...args) },
     obras: {
       findUnique: (...args: unknown[]) => mockFindUniqueObra(...args),
     },
@@ -35,6 +37,7 @@ jest.mock("../services/calculosRegistroTerreno.service", () => ({
     mockCalcularCampos(...args),
 }));
 
+import { calcularCamposRegistroTerreno } from "../utils/calculosRegistroTerreno";
 import { createRegistro } from "../controllers/registros.controller";
 
 function buildResponse() {
@@ -50,6 +53,7 @@ function buildResponse() {
 describe("createRegistro usa el cálculo autoritativo", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockTipos.mockResolvedValue([]);
     mockFindUniqueObra.mockResolvedValue({
       id: "a6048c0c-7641-4ae8-ac05-4a124fc68bc9",
       estado: "activa",
@@ -221,4 +225,48 @@ describe("createRegistro usa el cálculo autoritativo", () => {
     expect(mockCalcularCampos).not.toHaveBeenCalled();
     expect(mockCreateRegistro).not.toHaveBeenCalled();
   });
+  const nuevo = (tipo: string) => ({
+    user: { id: "usuario-1", rol: "terreno" },
+    body: { obraId: "a6048c0c-7641-4ae8-ac05-4a124fc68bc9", fecha: "2026-09-30",
+      descripcionMaterial: tipo, itemizadoBeck: tipo, numeroSello: "J-1",
+      modulo: "A", recinto: "Sala", piso: "1", ejeNumerico: "1", ejeAlfabetico: "A",
+      nombreSellador: "Operario", tipoRegistro: tipo, cantidadSellos: 3, metrosLineales: 1.5,
+      holgura: 4, accesibilidad: 2, aislacion: 1, reparacionTabique: 1,
+      cantidad_final: 9999, cantidad_sellos_aislacion: null,
+    },
+  } as unknown as Request);
+
+  it.each(["junta_lineal_espuma", "tabiqueria"])("crea %s con seis derivados, foto pendiente y aislación conservada", async (tipo) => {
+    mockCalcularCampos.mockImplementation(async (_obra, input) => calcularCamposRegistroTerreno(input));
+    const req = nuevo(tipo);
+    const res = buildResponse();
+    await createRegistro(req, res);
+    expect(res.status).toHaveBeenCalledWith(201);
+    const data = mockCreateRegistro.mock.calls[0][0].data;
+    expect(data.tipo_registro).toBe(tipo);
+    expect(data.numero_sello).toBe("J-1");
+    expect(data.itemizado_beck).toBe(tipo);
+    expect(data.carga_completa).toBe(false);
+    expect(data.cantidad_sellos).toBe(tipo === "tabiqueria" ? 3 : 0);
+    expect(data.metros_lineales).toBe(tipo === "tabiqueria" ? null : 1.5);
+    expect(data.aislacion).toBe(1.3);
+    expect(data.cantidad_sellos_aislacion).toBe(1.3);
+    expect(data.cantidad_final).toBeCloseTo(tipo === "tabiqueria" ? 8.2 : 7);
+  });
+
+  it("tabiquería rechaza cantidades fraccionarias", async () => {
+    const req = nuevo("tabiqueria"); req.body.cantidadSellos = 1.5;
+    const res = buildResponse(); await createRegistro(req, res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(mockCreateRegistro).not.toHaveBeenCalled();
+  });
+
+  it("no permite crear un tipo deshabilitado para la obra", async () => {
+    mockTipos.mockResolvedValue([{ tipo_registro: "sello_cortafuego" }]);
+    const res = buildResponse(); await createRegistro(nuevo("tabiqueria"), res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(mockCalcularCampos).not.toHaveBeenCalled();
+    expect(mockCreateRegistro).not.toHaveBeenCalled();
+  });
+
 });

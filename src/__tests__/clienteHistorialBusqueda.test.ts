@@ -20,7 +20,7 @@ jest.mock("../services/calculosRegistroTerreno.service", () => ({
 jest.mock("../services/cloudinary.service", () => ({ withPrivateImageUrl: jest.fn((foto) => foto) }));
 jest.mock("../controllers/ingenieria.controller", () => ({ findRegistroWithDetails: jest.fn() }));
 jest.mock("../controllers/registroPdf.controller", () => ({ generateRegistroPdfBuffer: jest.fn() }));
-import { getClienteHistorial } from "../controllers/cliente.controller";
+import { getClienteHistorial, getClienteRegistrosObra } from "../controllers/cliente.controller";
 
 function response() {
   const res = { status: jest.fn(), json: jest.fn() };
@@ -34,6 +34,24 @@ beforeEach(() => {
   mockRegistros.mockResolvedValue([]);
   mockCount.mockResolvedValue(0);
   mockTransaction.mockImplementation((queries) => Promise.all(queries));
+});
+
+test("filtra pendientes de firma por tipo conservando obra y estado", async () => {
+  const res = response();
+  await getClienteRegistrosObra({
+    user: { id: "cliente", rol: "cliente" }, params: { obraId: "odata" }, query: { tipoRegistro: "tabiqueria" },
+  } as unknown as Request, res);
+  expect(mockRegistros.mock.calls[0][0].where).toEqual({
+    obra_id: "odata", estado: "validado", validado_cliente: false, tipo_registro: "tabiqueria",
+  });
+});
+test("historial paginado de cliente sin obras tiene respuesta vacía consistente", async () => {
+  mockAsignaciones.mockResolvedValue([]);
+  const res = response();
+  await getClienteHistorial({
+    user: { id: "cliente", rol: "cliente" }, query: { paginated: "true", tipoRegistro: "tabiqueria" },
+  } as unknown as Request, res);
+  expect(res.json).toHaveBeenCalledWith({ success: true, data: { items: [], total: 0, nextCursor: null, obras: [] } });
 });
 
 test("sin texto no restringe el historial", () => {
@@ -80,12 +98,13 @@ test("aplica búsqueda, fecha y obras permitidas a los datos y al total antes de
   const res = response();
   await getClienteHistorial({
     user: { id: "cliente", rol: "cliente" },
-    query: { paginated: "true", search: "Recinto norte", obraId: "odata", fecha: "2026-09-25", limit: "1", cursor: "anterior" },
+    query: { tipoRegistro: "junta_lineal_espuma", paginated: "true", search: "Recinto norte", obraId: "odata", fecha: "2026-09-25", limit: "1", cursor: "anterior" },
   } as unknown as Request, res);
 
   const query = mockRegistros.mock.calls[0][0];
   expect(query.where).toEqual({
     obra_id: { in: ["odata", "otra"], equals: "odata" },
+    tipo_registro: "junta_lineal_espuma",
     estado: "validado", validado_cliente: true,
     fecha: new Date("2026-09-25T00:00:00.000Z"),
     ...filtroBusquedaHistorialCliente("Recinto norte"),

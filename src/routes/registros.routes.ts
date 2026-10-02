@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { checkRole, verifyAppToken } from "../middlewares/auth.middleware";
 import { uploadRegistroFotosFiles } from "../middlewares/upload.middleware";
+import { getResumenOperario } from "../controllers/resumenOperario.controller";
 import {
   createRegistro,
   deleteRegistroPendiente,
@@ -18,6 +19,7 @@ import {
 const router = Router();
 
 router.get("/mis-registros", verifyAppToken, getMisRegistros);
+router.get("/resumen-operario", verifyAppToken, checkRole("terreno"), getResumenOperario);
 router.get("/historial", verifyAppToken, getHistorialRegistros);
 router.get("/historial/:id", verifyAppToken, getHistorialRegistroDetalle);
 router.get(

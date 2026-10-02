@@ -1,4 +1,6 @@
+import { leerFiltroTipoRegistro } from "../utils/filtroTipoRegistro";
 import { Request, Response } from "express";
+import { getTiposRegistroPermitidos } from "../services/tiposRegistro.service";
 import { EstadoObra, EstadoRegistroTerreno, Prisma, RolUsuario } from "@prisma/client";
 import { prisma } from "../config/prisma";
 import {
@@ -240,7 +242,7 @@ export async function createRegistro(req: Request, res: Response) {
     const normalizedItemizadoBeck =
       normalizeText(itemizadoBeck) || normalizeText(descripcionMaterial);
 
-    if (!["sello_cortafuego", "junta_lineal_espuma"].includes(normalizedTipoRegistro)) {
+    if (!["sello_cortafuego", "junta_lineal_espuma", "tabiqueria"].includes(normalizedTipoRegistro)) {
       return res.status(400).json({
         success: false,
         error: "tipoRegistro no válido",
@@ -252,13 +254,9 @@ export async function createRegistro(req: Request, res: Response) {
       fecha,
       piso,
       nombreSellador,
-      ...(isJuntaLineal
-        ? { metrosLineales }
-        : {
-            descripcionMaterial: normalizedItemizadoBeck,
-            numeroSello,
-            cantidadSellos,
-          }),
+      descripcionMaterial: normalizedItemizadoBeck,
+      numeroSello,
+      ...(isJuntaLineal ? { metrosLineales } : { cantidadSellos }),
     };
 
     const missingFields = Object.entries(requiredFields)
@@ -309,6 +307,10 @@ export async function createRegistro(req: Request, res: Response) {
       });
     }
 
+    const tiposPermitidos = await getTiposRegistroPermitidos(obra.id);
+    if (!tiposPermitidos.includes(normalizedTipoRegistro)) {
+      return res.status(400).json({ success: false, error: "El tipo de registro no está habilitado para esta obra" });
+    }
     const rolConfiguracion = userRole === "terreno" ? "trabajador" : "jefeobra";
     const configuracion = await obtenerConfiguracionRegistro(
       obra.id,
@@ -329,19 +331,19 @@ export async function createRegistro(req: Request, res: Response) {
     const ejeAlfabeticoEfectivo = esVisible("eje_alfabetico")
       ? normalizeText(ejeAlfabetico)
       : "N/A";
-    const holguraInput = isJuntaLineal || !esVisible("holgura") ? 0 : holgura;
+    const holguraInput = !esVisible("holgura") ? 0 : holgura;
     const accesibilidadInput =
-      isJuntaLineal || !esVisible("accesibilidad")
+      !esVisible("accesibilidad")
         ? 0
         : accesibilidad ?? cieloModular;
     const aislacionInput =
-      isJuntaLineal || !esVisible("aislacion") ? null : aislacion;
+      !esVisible("aislacion") ? null : aislacion;
     const reparacionTabiqueInput =
-      isJuntaLineal || !esVisible("reparacion_tabique")
+      !esVisible("reparacion_tabique")
         ? null
         : reparacionTabique;
     const dimensionesInput =
-      userRole === "terreno" && !isJuntaLineal && esVisible("dimensiones")
+      userRole === "terreno" && esVisible("dimensiones")
         ? dimensiones
         : null;
     const dimensionesParsed = parseDimensiones(dimensionesInput);
@@ -356,12 +358,12 @@ export async function createRegistro(req: Request, res: Response) {
       ...(esVisible("modulo") ? { modulo: normalizedModulo } : {}),
       ...(esVisible("eje_numerico") ? { ejeNumerico: ejeNumericoEfectivo } : {}),
       ...(esVisible("eje_alfabetico") ? { ejeAlfabetico: ejeAlfabeticoEfectivo } : {}),
-      ...(!isJuntaLineal && esVisible("holgura") ? { holgura: holguraInput } : {}),
-      ...(!isJuntaLineal && esVisible("accesibilidad")
+      ...(esVisible("holgura") ? { holgura: holguraInput } : {}),
+      ...(esVisible("accesibilidad")
         ? { accesibilidad: accesibilidadInput }
         : {}),
-      ...(!isJuntaLineal && esVisible("aislacion") ? { aislacion: aislacionInput } : {}),
-      ...(!isJuntaLineal && esVisible("reparacion_tabique")
+      ...(esVisible("aislacion") ? { aislacion: aislacionInput } : {}),
+      ...(esVisible("reparacion_tabique")
         ? { reparacionTabique: reparacionTabiqueInput }
         : {}),
     };
@@ -379,23 +381,15 @@ export async function createRegistro(req: Request, res: Response) {
     }
 
     const cantidadSellosParsed = isJuntaLineal
-      ? { value: 1, error: null }
-      : parsePositiveInteger(cantidadSellos, "cantidadSellos");
-    const holguraParsed = isJuntaLineal
       ? { value: 0, error: null }
-      : parseNonNegativeNumber(normalizarHolguraMovil(holguraInput), "holgura");
-    const accesibilidadParsed = isJuntaLineal
-      ? { value: null, error: null }
-      : parseAccesibilidadNivel(accesibilidadInput);
+      : parsePositiveInteger(cantidadSellos, "cantidadSellos");
+    const holguraParsed = parseNonNegativeNumber(normalizedTipoRegistro !== "sello_cortafuego" ? holguraInput : normalizarHolguraMovil(holguraInput), "holgura");
+    const accesibilidadParsed = parseAccesibilidadNivel(accesibilidadInput);
     const metrosLinealesParsed = isJuntaLineal
       ? parsePositiveNumber(metrosLineales, "longitud")
       : { value: null, error: null };
-    const aislacionParsed = isJuntaLineal
-      ? { value: null, error: null }
-      : parseOptionalNonNegativeNumber(aislacionInput, "aislacion");
-    const reparacionTabiqueParsed = isJuntaLineal
-      ? { value: null, error: null }
-      : parseOptionalBinaryNumber(reparacionTabiqueInput, "reparacionTabique");
+    const aislacionParsed = parseOptionalNonNegativeNumber(aislacionInput, "aislacion");
+    const reparacionTabiqueParsed = parseOptionalBinaryNumber(reparacionTabiqueInput, "reparacionTabique");
     const numericErrors = [
       cantidadSellosParsed.error,
       holguraParsed.error,
@@ -412,10 +406,9 @@ export async function createRegistro(req: Request, res: Response) {
       });
     }
 
-    const calcResult = isJuntaLineal
-      ? null
-      : await calcularCamposConConfiguracion(obra.id, {
+    const calcResult = await calcularCamposConConfiguracion(obra.id, {
           cantidad_sellos: cantidadSellosParsed.value!,
+          metros_lineales: metrosLinealesParsed.value,
           holgura: holguraParsed.value!,
           accesibilidad: accesibilidadParsed.value ?? 1,
           aislacion: normalizarEstadoAislacionMovil(aislacionParsed.value),
@@ -430,23 +423,21 @@ export async function createRegistro(req: Request, res: Response) {
         usuario_id: userId,
         fecha: fechaDate,
         dia_semana: getDiaSemana(fechaDate),
-        descripcion_material: isJuntaLineal
-          ? "Junta Lineal Espuma"
-          : normalizedItemizadoBeck,
-        itemizado_beck: isJuntaLineal ? null : normalizedItemizadoBeck,
-        dimensiones: isJuntaLineal ? null : dimensionesParsed.value,
+        descripcion_material: normalizedItemizadoBeck,
+        itemizado_beck: normalizedItemizadoBeck,
+        dimensiones: dimensionesParsed.value,
         modulo: normalizedModulo,
         recinto: normalizedRecinto || null,
         piso: normalizeText(piso),
         eje_numerico: ejeNumericoEfectivo,
         eje_alfabetico: ejeAlfabeticoEfectivo,
-        numero_sello: isJuntaLineal ? "N/A" : normalizeText(numeroSello),
+        numero_sello: normalizeText(numeroSello),
         cantidad_sellos: cantidadSellosParsed.value!,
         nombre_sellador: normalizeText(nombreSellador),
         holgura: holguraParsed.value!,
         factor_por_holguras: calcResult?.factor_por_holguras ?? null,
         accesibilidad:
-          !isJuntaLineal && accesibilidadInput !== undefined
+          accesibilidadInput !== undefined
             ? accesibilidadParsed.value
             : null,
         cantidad_sellos_con_factores:
@@ -463,7 +454,7 @@ export async function createRegistro(req: Request, res: Response) {
         carga_completa: false,
         estado: "pendiente",
         devuelto_a_tecnico: false,
-        itemizado_mandante: isJuntaLineal || !esVisible("itemizadoMandante")
+        itemizado_mandante: !esVisible("itemizadoMandante")
           ? null
           : normalizeText(itemizadoSacyr) || null,
         metros_lineales: isJuntaLineal ? metrosLinealesParsed.value! : null,
@@ -500,6 +491,15 @@ export async function getMisRegistros(req: Request, res: Response) {
     const obraId = typeof req.query.obraId === "string" ? req.query.obraId : undefined;
     const estado = typeof req.query.estado === "string" ? req.query.estado : undefined;
     const scope = typeof req.query.scope === "string" ? req.query.scope : undefined;
+    const tipoFiltro = leerFiltroTipoRegistro(req.query.tipoRegistro, res);
+    if (tipoFiltro === false) return;
+    const fechaFiltro = normalizeText(req.query.fecha);
+    const fechaSeleccionada = fechaFiltro ? new Date(`${fechaFiltro}T00:00:00.000Z`) : null;
+    if (fechaFiltro && (!/^\d{4}-\d{2}-\d{2}$/.test(fechaFiltro) ||
+      !fechaSeleccionada || Number.isNaN(fechaSeleccionada.getTime()) ||
+      fechaSeleccionada.toISOString().slice(0, 10) !== fechaFiltro)) {
+      return res.status(400).json({ success: false, error: "Fecha no válida. Usa YYYY-MM-DD." });
+    }
     const vistaAdministrador = userRole === "administrador" &&
       (req.query.vista === "operario" || req.query.vista === "supervisor")
         ? req.query.vista
@@ -509,8 +509,8 @@ export async function getMisRegistros(req: Request, res: Response) {
       : vistaAdministrador === "operario"
         ? "terreno"
         : userRole;
-    const paginatedSupervisorView =
-      operationalRole === "jefeobra" &&
+    const paginatedRegistroView =
+      (operationalRole === "jefeobra" || operationalRole === "terreno") &&
       scope === "registro" &&
       req.query.paginated === "true";
     const cursor = normalizeText(req.query.cursor);
@@ -533,7 +533,7 @@ export async function getMisRegistros(req: Request, res: Response) {
       });
     }
 
-    if (paginatedSupervisorView && cursor && !/^[0-9a-f-]{36}$/i.test(cursor)) {
+    if (paginatedRegistroView && cursor && !/^[0-9a-f-]{36}$/i.test(cursor)) {
       return res.status(400).json({
         success: false,
         error: "Cursor de paginación no válido",
@@ -545,7 +545,7 @@ export async function getMisRegistros(req: Request, res: Response) {
     const registroCodePrefix =
       registroCodeMatch?.[1] ?? plainRegistroCodeMatch?.[1] ?? "";
     const registroIds =
-      paginatedSupervisorView && registroCodePrefix
+      paginatedRegistroView && registroCodePrefix
         ? await prisma.$queryRaw<Array<{ id: string }>>`
             SELECT id::text AS id
             FROM registros_terreno
@@ -554,11 +554,13 @@ export async function getMisRegistros(req: Request, res: Response) {
           `
         : [];
     const searchFilter: Prisma.registros_terrenoWhereInput | undefined =
-      paginatedSupervisorView && search
+      paginatedRegistroView && search
         ? {
             OR: [
               { numero_sello: { contains: search, mode: "insensitive" } },
               { piso: { contains: search, mode: "insensitive" } },
+              { obras: { nombre: { contains: search, mode: "insensitive" } } },
+              { obras: { codigo: { contains: search, mode: "insensitive" } } },
               { eje_numerico: { contains: search, mode: "insensitive" } },
               { eje_alfabetico: { contains: search, mode: "insensitive" } },
               { nombre_sellador: { contains: search, mode: "insensitive" } },
@@ -601,6 +603,22 @@ export async function getMisRegistros(req: Request, res: Response) {
           ? supervisorRejectedFilter
           : supervisorAllFilter;
 
+    const terrenoPendingFilter: Prisma.registros_terrenoWhereInput[] = [
+      { estado: "pendiente", es_correccion: false },
+      { estado: "pendiente", es_correccion: true, devuelto_a_tecnico: true },
+      { estado: "pendiente", es_correccion: true, corregido_at: { not: null } },
+    ];
+    const terrenoRejectedFilter: Prisma.registros_terrenoWhereInput[] = [
+      { estado: "rechazado", devuelto_a_tecnico: true },
+      { estado: "pendiente", es_correccion: true, devuelto_a_tecnico: true },
+    ];
+    const allFilters = operationalRole === "terreno"
+      ? [...terrenoPendingFilter, ...terrenoRejectedFilter] : supervisorAllFilter;
+    const pendingFilters = operationalRole === "terreno" ? terrenoPendingFilter : supervisorPendingFilter;
+    const rejectedFilters = operationalRole === "terreno" ? terrenoRejectedFilter : supervisorRejectedFilter;
+    const selectedFilters = estado === "pendiente" ? pendingFilters
+      : estado === "rechazado" ? rejectedFilters : allFilters;
+
     const visibilidadTerreno = {
       OR: [
         { es_correccion: false },
@@ -624,7 +642,7 @@ export async function getMisRegistros(req: Request, res: Response) {
                 }
               : {}),
             ...(obraId ? { obra_id: obraId } : {}),
-            ...(!paginatedSupervisorView && estado
+            ...(!paginatedRegistroView && estado
               ? { estado: estado as EstadoRegistroTerreno }
               : {}),
             obras: {
@@ -639,8 +657,8 @@ export async function getMisRegistros(req: Request, res: Response) {
         : {
             carga_completa: true,
             usuario_id: userId,
-            ...(estado ? { estado: estado as EstadoRegistroTerreno } : {}),
-            ...(operationalRole === "terreno" ? { AND: [visibilidadTerreno] } : {}),
+            ...(!paginatedRegistroView && estado ? { estado: estado as EstadoRegistroTerreno } : {}),
+            ...(operationalRole === "terreno" ? { AND: [visibilidadTerreno, ...(searchFilter ? [searchFilter] : [])] } : {}),
             ...(scope === "registro"
               ? {
                   OR: [
@@ -667,13 +685,22 @@ export async function getMisRegistros(req: Request, res: Response) {
               : {}),
           };
 
+    if (tipoFiltro) where.tipo_registro = tipoFiltro;
+    // fecha es DATE en PostgreSQL: conserva el día seleccionado, sin conversión local.
+    if (fechaSeleccionada) where.fecha = fechaSeleccionada;
+    if (paginatedRegistroView && operationalRole === "terreno") {
+      where.OR = selectedFilters;
+      where.other_registros_terreno = { none: {} };
+      if (obraId) where.obra_id = obraId;
+    }
+
     const registrosResult = await prisma.registros_terreno.findMany({
       where,
-      orderBy: paginatedSupervisorView
+      orderBy: paginatedRegistroView
         ? [{ created_at: "desc" }, { id: "desc" }]
         : { created_at: "desc" },
-      take: paginatedSupervisorView ? limit + 1 : 100,
-      ...(paginatedSupervisorView && cursor
+      take: paginatedRegistroView ? limit + 1 : 100,
+      ...(paginatedRegistroView && cursor
         ? { cursor: { id: cursor }, skip: 1 }
         : {}),
       include: {
@@ -741,8 +768,8 @@ export async function getMisRegistros(req: Request, res: Response) {
       },
     });
 
-    const hasMore = paginatedSupervisorView && registrosResult.length > limit;
-    const registros = paginatedSupervisorView
+    const hasMore = paginatedRegistroView && registrosResult.length > limit;
+    const registros = paginatedRegistroView
       ? registrosResult.slice(0, limit)
       : registrosResult;
 
@@ -754,10 +781,10 @@ export async function getMisRegistros(req: Request, res: Response) {
         }
       | undefined;
 
-    if (paginatedSupervisorView) {
-      const allCountWhere = { ...where, OR: supervisorAllFilter };
-      const pendingCountWhere = { ...where, OR: supervisorPendingFilter };
-      const rejectedCountWhere = { ...where, OR: supervisorRejectedFilter };
+    if (paginatedRegistroView) {
+      const allCountWhere = { ...where, OR: allFilters };
+      const pendingCountWhere = { ...where, OR: pendingFilters };
+      const rejectedCountWhere = { ...where, OR: rejectedFilters };
       const [todos, pendiente, rechazado] = await Promise.all([
         prisma.registros_terreno.count({ where: allCountWhere }),
         prisma.registros_terreno.count({ where: pendingCountWhere }),
@@ -927,6 +954,8 @@ function buildHistorialFilters(req: Request): Prisma.registros_terrenoWhereInput
 
 export async function getHistorialRegistros(req: Request, res: Response) {
   try {
+    const tipoFiltro = leerFiltroTipoRegistro(req.query.tipoRegistro, res);
+    if (tipoFiltro === false) return;
     const userId = req.user?.id;
     const role = req.user?.rol;
     if (!userId) return res.status(401).json({ success: false, error: "Usuario no autenticado" });
@@ -953,6 +982,7 @@ export async function getHistorialRegistros(req: Request, res: Response) {
     const where: Prisma.registros_terrenoWhereInput = {
       carga_completa: true,
       AND: [roleWhere, buildHistorialFilters(req)],
+      ...(tipoFiltro ? { tipo_registro: tipoFiltro } : {}),
     };
     const limit = parseHistorialLimit(req.query.limit);
     const cursor = normalizeText(req.query.cursor);
@@ -1076,7 +1106,7 @@ export async function getResumenSupervisor(req: Request, res: Response) {
       });
     }
 
-    if (!["sello_cortafuego", "junta_lineal_espuma"].includes(tipoRegistro)) {
+    if (!["sello_cortafuego", "junta_lineal_espuma", "tabiqueria"].includes(tipoRegistro)) {
       return res.status(400).json({
         success: false,
         error: "tipoRegistro no válido",
@@ -1327,9 +1357,13 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
 
     const normalizedTipoRegistro =
       normalizeText(tipoRegistro) || currentRegistro.tipo_registro || "sello_cortafuego";
+    if (normalizedTipoRegistro !== currentRegistro.tipo_registro) {
+      return res.status(400).json({ success: false, error: "No se puede cambiar el tipo de un registro existente" });
+    }
+
     const isJuntaLineal = normalizedTipoRegistro === "junta_lineal_espuma";
 
-    if (!["sello_cortafuego", "junta_lineal_espuma"].includes(normalizedTipoRegistro)) {
+    if (!["sello_cortafuego", "junta_lineal_espuma", "tabiqueria"].includes(normalizedTipoRegistro)) {
       return res.status(400).json({
         success: false,
         error: "tipoRegistro no válido",
@@ -1349,28 +1383,20 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
     }
 
     const cantidadSellosParsed = isJuntaLineal
-      ? { value: 1, error: null }
-      : parsePositiveInteger(cantidadSellos ?? currentRegistro.cantidad_sellos, "cantidadSellos");
-    const holguraParsed = isJuntaLineal
       ? { value: 0, error: null }
-      : parseNonNegativeNumber(
-          normalizarHolguraMovil(holguraInput ?? currentRegistro.holgura),
+      : parsePositiveInteger(cantidadSellos ?? currentRegistro.cantidad_sellos, "cantidadSellos");
+    const holguraParsed = parseNonNegativeNumber(
+          normalizedTipoRegistro !== "sello_cortafuego" ? (holguraInput ?? currentRegistro.holgura) : normalizarHolguraMovil(holguraInput ?? currentRegistro.holgura),
           "holgura",
         );
-    const accesibilidadParsed = isJuntaLineal
-      ? { value: null, error: null }
-      : parseAccesibilidadNivel(
+    const accesibilidadParsed = parseAccesibilidadNivel(
           accesibilidadInput ?? currentRegistro.accesibilidad,
         );
     const metrosLinealesParsed = isJuntaLineal
       ? parsePositiveNumber(metrosLineales ?? currentRegistro.metros_lineales, "longitud")
       : { value: null, error: null };
-    const aislacionParsed = isJuntaLineal
-      ? { value: null, error: null }
-      : parseOptionalNonNegativeNumber(aislacionInput, "aislacion");
-    const reparacionTabiqueParsed = isJuntaLineal
-      ? { value: null, error: null }
-      : parseOptionalBinaryNumber(reparacionTabiqueInput, "reparacionTabique");
+    const aislacionParsed = parseOptionalNonNegativeNumber(aislacionInput, "aislacion");
+    const reparacionTabiqueParsed = parseOptionalBinaryNumber(reparacionTabiqueInput, "reparacionTabique");
     const numericErrors = [
       cantidadSellosParsed.error,
       holguraParsed.error,
@@ -1388,25 +1414,18 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
     }
 
     const pisoFinal = normalizeText(piso) || currentRegistro.piso;
-    const accesibilidadFinal = isJuntaLineal
-      ? null
-      : accesibilidadInput !== undefined
+    const accesibilidadFinal = accesibilidadInput !== undefined
         ? accesibilidadParsed.value
         : currentRegistro.accesibilidad;
-    const aislacionFinal = isJuntaLineal
-      ? null
-      : aislacionInput !== undefined
+    const aislacionFinal = aislacionInput !== undefined
         ? normalizarEstadoAislacionMovil(aislacionParsed.value)
         : currentRegistro.aislacion;
-    const reparacionFinal = isJuntaLineal
-      ? null
-      : reparacionTabiqueInput !== undefined
+    const reparacionFinal = reparacionTabiqueInput !== undefined
         ? reparacionTabiqueParsed.value
         : currentRegistro.reparacion_tabique;
-    const calcResult = isJuntaLineal
-      ? null
-      : await calcularCamposConConfiguracion(currentRegistro.obra_id, {
+    const calcResult = await calcularCamposConConfiguracion(currentRegistro.obra_id, {
           cantidad_sellos: cantidadSellosParsed.value!,
+          metros_lineales: metrosLinealesParsed.value,
           holgura: holguraParsed.value!,
           accesibilidad: accesibilidadFinal ?? 1,
           aislacion: aislacionFinal,
@@ -1425,19 +1444,15 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
       data: {
         fecha: fechaDate,
         dia_semana: getDiaSemana(fechaDate),
-        descripcion_material: isJuntaLineal
-          ? "Junta Lineal Espuma"
-          : normalizeText(itemizadoBeck) ||
+        descripcion_material: normalizeText(itemizadoBeck) ||
             normalizeText(descripcionMaterial) ||
             currentRegistro.itemizado_beck ||
             currentRegistro.descripcion_material,
-        itemizado_beck: isJuntaLineal
-          ? null
-          : normalizeText(itemizadoBeck) ||
+        itemizado_beck: normalizeText(itemizadoBeck) ||
             normalizeText(descripcionMaterial) ||
             currentRegistro.itemizado_beck ||
             currentRegistro.descripcion_material,
-        dimensiones: isJuntaLineal ? null : dimensionesParsed.value,
+        dimensiones: dimensionesParsed.value,
         modulo:
           normalizeText(moduloEdificioInput) ||
           normalizeText(moduloInput) ||
@@ -1447,9 +1462,7 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
         piso: pisoFinal,
         eje_numerico: normalizeText(ejeNumericoInput) || currentRegistro.eje_numerico,
         eje_alfabetico: normalizeText(ejeAlfabeticoInput) || currentRegistro.eje_alfabetico,
-        numero_sello: isJuntaLineal
-          ? "N/A"
-          : normalizeText(numeroSello) || currentRegistro.numero_sello,
+        numero_sello: normalizeText(numeroSello) || currentRegistro.numero_sello,
         cantidad_sellos: cantidadSellosParsed.value!,
         nombre_sellador: normalizeText(nombreSellador) || currentRegistro.nombre_sellador,
         holgura: holguraParsed.value!,
@@ -1464,9 +1477,7 @@ export async function updateRegistroTecnico(req: Request, res: Response) {
           calcResult?.reparacion_tabique_normalizada ?? null,
         cantidad_final: calcResult?.cantidad_final ?? null,
         observaciones: normalizeText(observaciones) || null,
-        itemizado_mandante: isJuntaLineal
-          ? null
-          : normalizeText(itemizadoMandanteInput) || currentRegistro.itemizado_mandante,
+        itemizado_mandante: normalizeText(itemizadoMandanteInput) || currentRegistro.itemizado_mandante,
         metros_lineales: isJuntaLineal ? metrosLinealesParsed.value! : null,
         tipo_registro: normalizedTipoRegistro,
         estado: "pendiente",
@@ -1820,9 +1831,13 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
 
     const normalizedTipoRegistro =
       normalizeText(tipoRegistro) || currentRegistro.tipo_registro || "sello_cortafuego";
+    if (normalizedTipoRegistro !== currentRegistro.tipo_registro) {
+      return res.status(400).json({ success: false, error: "No se puede cambiar el tipo de un registro existente" });
+    }
+
     const isJuntaLineal = normalizedTipoRegistro === "junta_lineal_espuma";
 
-    if (!["sello_cortafuego", "junta_lineal_espuma"].includes(normalizedTipoRegistro)) {
+    if (!["sello_cortafuego", "junta_lineal_espuma", "tabiqueria"].includes(normalizedTipoRegistro)) {
       return res.status(400).json({
         success: false,
         error: "tipoRegistro no válido",
@@ -1842,20 +1857,16 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
     }
 
     const cantidadSellosParsed = isJuntaLineal
-      ? { value: 1, error: null }
+      ? { value: 0, error: null }
       : parsePositiveInteger(
           cantidadSellos ?? currentRegistro.cantidad_sellos,
           "cantidadSellos"
         );
-    const holguraParsed = isJuntaLineal
-      ? { value: 0, error: null }
-      : parseNonNegativeNumber(
-          normalizarHolguraMovil(holguraInput ?? currentRegistro.holgura),
+    const holguraParsed = parseNonNegativeNumber(
+          normalizedTipoRegistro !== "sello_cortafuego" ? (holguraInput ?? currentRegistro.holgura) : normalizarHolguraMovil(holguraInput ?? currentRegistro.holgura),
           "holgura",
         );
-    const accesibilidadParsed = isJuntaLineal
-      ? { value: null, error: null }
-      : parseAccesibilidadNivel(
+    const accesibilidadParsed = parseAccesibilidadNivel(
           accesibilidadInput ?? currentRegistro.accesibilidad,
         );
     const metrosLinealesParsed = isJuntaLineal
@@ -1864,12 +1875,8 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
           "longitud"
         )
       : { value: null, error: null };
-    const aislacionParsed = isJuntaLineal
-      ? { value: null, error: null }
-      : parseOptionalNonNegativeNumber(aislacionInput, "aislacion");
-    const reparacionTabiqueParsed = isJuntaLineal
-      ? { value: null, error: null }
-      : parseOptionalBinaryNumber(reparacionTabiqueInput, "reparacionTabique");
+    const aislacionParsed = parseOptionalNonNegativeNumber(aislacionInput, "aislacion");
+    const reparacionTabiqueParsed = parseOptionalBinaryNumber(reparacionTabiqueInput, "reparacionTabique");
     const numericErrors = [
       cantidadSellosParsed.error,
       holguraParsed.error,
@@ -1887,25 +1894,18 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
     }
 
     const pisoFinal = normalizeText(piso) || currentRegistro.piso;
-    const accesibilidadFinal = isJuntaLineal
-      ? null
-      : accesibilidadInput !== undefined
+    const accesibilidadFinal = accesibilidadInput !== undefined
         ? accesibilidadParsed.value
         : currentRegistro.accesibilidad;
-    const aislacionFinal = isJuntaLineal
-      ? null
-      : aislacionInput !== undefined
+    const aislacionFinal = aislacionInput !== undefined
         ? normalizarEstadoAislacionMovil(aislacionParsed.value)
         : currentRegistro.aislacion;
-    const reparacionFinal = isJuntaLineal
-      ? null
-      : reparacionTabiqueInput !== undefined
+    const reparacionFinal = reparacionTabiqueInput !== undefined
         ? reparacionTabiqueParsed.value
         : currentRegistro.reparacion_tabique;
-    const calcResult = isJuntaLineal
-      ? null
-      : await calcularCamposConConfiguracion(currentRegistro.obra_id, {
+    const calcResult = await calcularCamposConConfiguracion(currentRegistro.obra_id, {
           cantidad_sellos: cantidadSellosParsed.value!,
+          metros_lineales: metrosLinealesParsed.value,
           holgura: holguraParsed.value!,
           accesibilidad: accesibilidadFinal ?? 1,
           aislacion: aislacionFinal,
@@ -1924,15 +1924,11 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
       data: {
         fecha: fechaDate,
         dia_semana: getDiaSemana(fechaDate),
-        descripcion_material: isJuntaLineal
-          ? "Junta Lineal Espuma"
-          : normalizeText(itemizadoBeck) ||
+        descripcion_material: normalizeText(itemizadoBeck) ||
             normalizeText(descripcionMaterial) ||
             currentRegistro.itemizado_beck ||
             currentRegistro.descripcion_material,
-        itemizado_beck: isJuntaLineal
-          ? null
-          : normalizeText(itemizadoBeck) ||
+        itemizado_beck: normalizeText(itemizadoBeck) ||
             normalizeText(descripcionMaterial) ||
             currentRegistro.itemizado_beck ||
             currentRegistro.descripcion_material,
@@ -1945,9 +1941,7 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
         piso: pisoFinal,
         eje_numerico: normalizeText(ejeNumericoInput) || currentRegistro.eje_numerico,
         eje_alfabetico: normalizeText(ejeAlfabeticoInput) || currentRegistro.eje_alfabetico,
-        numero_sello: isJuntaLineal
-          ? "N/A"
-          : normalizeText(numeroSello) || currentRegistro.numero_sello,
+        numero_sello: normalizeText(numeroSello) || currentRegistro.numero_sello,
         cantidad_sellos: cantidadSellosParsed.value!,
         nombre_sellador: normalizeText(nombreSellador) || currentRegistro.nombre_sellador,
         holgura: holguraParsed.value!,
@@ -1966,12 +1960,8 @@ export async function updateRegistroJefeObra(req: Request, res: Response) {
             ? normalizeText(folioInput) || null
             : currentRegistro.folio,
         observaciones: normalizeText(observaciones) || null,
-        itemizado_mandante: isJuntaLineal
-          ? null
-          : normalizeText(itemizadoMandanteInput) || currentRegistro.itemizado_mandante,
-        codigo_beck: isJuntaLineal
-          ? null
-          : codigoBeckInput !== undefined
+        itemizado_mandante: normalizeText(itemizadoMandanteInput) || currentRegistro.itemizado_mandante,
+        codigo_beck: codigoBeckInput !== undefined
             ? normalizeText(codigoBeckInput) || null
             : currentRegistro.codigo_beck,
         metros_lineales: isJuntaLineal ? metrosLinealesParsed.value! : null,

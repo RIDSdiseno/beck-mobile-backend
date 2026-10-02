@@ -1,3 +1,4 @@
+import { leerFiltroTipoRegistro } from "../utils/filtroTipoRegistro";
 import { Request, Response } from "express";
 import { prisma } from "../config/prisma";
 import {
@@ -302,6 +303,8 @@ export async function getClienteRegistrosObra(req: Request, res: Response) {
   try {
     const session = requireCliente(req, res);
     if (!session) return;
+    const tipoFiltro = leerFiltroTipoRegistro(req.query?.tipoRegistro, res);
+    if (tipoFiltro === false) return;
 
     const obraId = typeof req.params.obraId === "string" ? req.params.obraId : "";
 
@@ -316,7 +319,8 @@ export async function getClienteRegistrosObra(req: Request, res: Response) {
     }
 
     const registros = await prisma.registros_terreno.findMany({
-      where: { obra_id: obraId, estado: "validado", validado_cliente: false },
+      where: { obra_id: obraId, estado: "validado", validado_cliente: false,
+        ...(tipoFiltro ? { tipo_registro: tipoFiltro } : {}), },
       select: REGISTRO_SELECT,
       orderBy: { fecha: "desc" },
     });
@@ -334,11 +338,14 @@ export async function getClienteHistorial(req: Request, res: Response) {
   try {
     const session = requireCliente(req, res);
     if (!session) return;
+    const tipoFiltro = leerFiltroTipoRegistro(req.query?.tipoRegistro, res);
+    if (tipoFiltro === false) return;
 
     const obraIds = await getObraIdsCliente(session.userId, session.userRole);
 
     if (obraIds.length === 0) {
-      return res.json({ success: true, data: [] });
+      return res.json({ success: true, data: req.query.paginated === "true"
+        ? { items: [], total: 0, nextCursor: null, obras: [] } : [] });
     }
 
     const paginated = req.query.paginated === "true";
@@ -351,6 +358,7 @@ export async function getClienteHistorial(req: Request, res: Response) {
       : 25;
     const cursor = String(req.query.cursor ?? "").trim();
     const where = {
+      ...(tipoFiltro ? { tipo_registro: tipoFiltro } : {}),
       obra_id: { in: obraIds, ...(obraId ? { equals: obraId } : {}) },
       estado: "validado" as const,
       validado_cliente: true,
