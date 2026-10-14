@@ -10,21 +10,22 @@ import {
   updateInventarioFiremat,
   updateProductoFiremat,
 } from "../controllers/firemat.controller";
-import { checkRole, verifyAppToken } from "../middlewares/auth.middleware";
+import { verifyAppToken } from "../middlewares/auth.middleware";
+import { permitirFiremat } from "../middlewares/firematAccess.middleware";
 
 const router = Router();
-const rolesFiremat = checkRole("vendedor_firemat", "bodeguero", "visualizador_firemat");
-const soloBodeguero = checkRole("bodeguero");
+const rolesFiremat = permitirFiremat();
+const gestionarInventario = permitirFiremat(true);
 
 router.use(verifyAppToken, rolesFiremat);
 router.get("/categorias", getCategoriasFiremat);
 router.get("/productos", getProductosFiremat);
-router.post("/productos", soloBodeguero, createProductoFiremat);
-router.put("/productos/:id", soloBodeguero, updateProductoFiremat);
+router.post("/productos", gestionarInventario, createProductoFiremat);
+router.put("/productos/:id", gestionarInventario, updateProductoFiremat);
 router.get("/inventario", getInventarioFiremat);
-router.get("/inventario/codigo/:codigo", soloBodeguero, getProductoPorCodigoBarraFiremat);
-router.post("/inventario/codigos", soloBodeguero, asociarCodigoBarraFiremat);
-router.post("/inventario/recepciones", soloBodeguero, createRecepcionEscaneoFiremat);
-router.patch("/inventario/:productoId", soloBodeguero, updateInventarioFiremat);
+router.get("/inventario/codigo/:codigo", gestionarInventario, getProductoPorCodigoBarraFiremat);
+router.post("/inventario/codigos", gestionarInventario, asociarCodigoBarraFiremat);
+router.post("/inventario/recepciones", gestionarInventario, createRecepcionEscaneoFiremat);
+router.patch("/inventario/:productoId", gestionarInventario, updateInventarioFiremat);
 
 export default router;

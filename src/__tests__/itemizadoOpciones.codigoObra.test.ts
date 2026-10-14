@@ -90,6 +90,21 @@ describe("itemizado por obra con códigos propios (itemizado antiguo)", () => {
     expect(where.OR).toContainEqual({ id: { in: ["op-1-140"] } });
   });
 
+  it("con obra entrega todos sus ítems aunque pasen de 100, para filtrar en la app", async () => {
+    const muchos = Array.from({ length: 150 }, (_, i) => ({
+      id: `op-${i}`, codigo_beck: `9-${i}`, tipo: null, elemento_pasante: `Ítem ${i}`,
+      elemento_penetra: "Muro", materialidad: "Tabique", visible: false,
+    }));
+    mockFindManyOpciones.mockResolvedValue(muchos);
+    mockFindManyConfigs.mockResolvedValue(
+      muchos.map((op) => ({ itemizado_opcion_id: op.id, visible: true, nombre_personalizado: null, codigo_personalizado: null })),
+    );
+
+    const { data } = await consultar({ obraId: OBRA, limit: "1000" });
+
+    expect(data).toHaveLength(150);
+  });
+
   it("sin obra no consulta códigos propios y responde como antes", async () => {
     mockFindManyOpciones.mockResolvedValue(catalogo.map((op) => ({ ...op, visible: true })));
 

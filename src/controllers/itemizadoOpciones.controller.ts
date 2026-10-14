@@ -18,9 +18,12 @@ export async function getItemizadoOpciones(req: Request, res: Response) {
     const obraId = UUID_REGEX.test(obraIdRaw) ? obraIdRaw : "";
     const visibleParam = getQueryValue(req.query.visible);
     const limitValue = Number(req.query.limit);
+    // Con obra, la lista ya está acotada a lo configurado en ella: se permite traerla
+    // completa para que la app filtre en el teléfono (Sótero, por ejemplo, tiene 94).
+    const maximo = obraId ? 1000 : 100;
     const take =
       Number.isFinite(limitValue) && limitValue > 0
-        ? Math.min(Math.trunc(limitValue), 100)
+        ? Math.min(Math.trunc(limitValue), maximo)
         : 80;
 
     if (obraId) {
