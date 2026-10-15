@@ -1381,6 +1381,11 @@ enum RolUsuario {
   bodeguero
   visualizador_firemat
   cliente
+  // Roles de Trager: solo existen para el CRM. El login de la app los rechaza
+  // (ver obtenerEmpresaUsuario), pero Prisma debe conocerlos para leer esos usuarios.
+  vendedor_trager
+  bodeguero_trager
+  visualizador_trager
 }
 
 enum TipoIndicadorEconomico {

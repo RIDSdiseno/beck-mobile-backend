@@ -14,6 +14,14 @@ describe("separación de empresa móvil", () => {
     expect(obtenerEmpresaUsuario("bodega@becksoluciones.cl", "bodeguero")).toBeNull();
   });
 
+  it("no deja entrar a la app a los roles de Trager (solo usan el CRM)", () => {
+    for (const rol of ["vendedor_trager", "bodeguero_trager", "visualizador_trager"]) {
+      expect(obtenerEmpresaUsuario("usuario@trager.cl", rol)).toBeNull();
+      expect(obtenerEmpresaUsuario("usuario@becksoluciones.cl", rol)).toBeNull();
+      expect(obtenerEmpresaUsuario("usuario@firemat.cl", rol)).toBeNull();
+    }
+  });
+
   it("mantiene clientes externos dentro del portal Beck", () => {
     expect(obtenerEmpresaUsuario("cliente@mandante.cl", "cliente")).toBe("beck");
   });
